@@ -143,6 +143,18 @@ svg[class^="ico"], svg[class*=" ico"]{
 .vacio h1{ margin:12px 0 6px; font-size:19px; color:var(--texto); font-weight:600; }
 .vacio p{ margin:0; font-size:14px; }
 
+.cartel-escaneo{
+  margin:auto; max-width:520px; display:flex; gap:14px; align-items:flex-start;
+  background:var(--fondo-2); border:1px solid var(--borde);
+  border-left:4px solid var(--azul); border-radius:var(--radio);
+  padding:18px 20px; box-shadow:var(--sombra);
+}
+.ico-cartel{ width:30px; height:30px; color:var(--azul); stroke-width:1.6; margin-top:2px; }
+.cartel-escaneo strong{ display:block; font-size:15.5px; margin-bottom:5px; }
+.cartel-escaneo p{ margin:0 0 8px; font-size:13.5px; color:var(--texto-2); line-height:1.5; }
+.cartel-escaneo p:last-child{ margin-bottom:0; }
+.cartel-pista{ padding-top:8px; border-top:1px solid var(--borde-suave); }
+
 .hoja-envoltura{ margin:auto; }
 .hoja{
   position:relative; line-height:0;

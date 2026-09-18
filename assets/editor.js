@@ -198,7 +198,6 @@ function estrenarDocumento(bytes, comoSeLlama) {
   pila = []; cambios = []; contadorFuente = 0;
   if (!abrirBytes(bytes, comoSeLlama)) return;
   $('#vacio').hidden = true;
-  $('#hojaEnvoltura').hidden = false;
   $('#paginador').hidden = false;
   $('#btnDescargar').disabled = false;
   pintarCambios();
@@ -244,6 +243,12 @@ function dibujar() {
   renglones = leerRenglones(pagina);
   pintarRenglones();
 
+  // Una hoja escaneada no tiene letras dentro, solo píxeles. Antes se
+  // quedaba la hoja ahí, muda, con un «0 renglones» que parecía una avería.
+  const esEscaneo = renglones.length === 0;
+  $('#cartelEscaneo').hidden = !esEscaneo;
+  $('#hojaEnvoltura').hidden = esEscaneo;
+
   $('#pagEtiqueta').textContent = (paginaActual + 1) + ' / ' + totalPaginas;
   $('#pagAnterior').disabled = paginaActual === 0;
   $('#pagSiguiente').disabled = paginaActual >= totalPaginas - 1;
@@ -251,7 +256,7 @@ function dibujar() {
   const marco = marcoDe(pagina);
   $('#docDetalle').textContent =
     totalPaginas + (totalPaginas === 1 ? ' hoja' : ' hojas') +
-    ' · ' + renglones.length + ' renglones en esta' +
+    ' · ' + (esEscaneo ? 'esta es un escaneo' : renglones.length + ' renglones en esta') +
     (marco.giro ? ' · hoja girada ' + marco.giro + '°' : '');
 }
 

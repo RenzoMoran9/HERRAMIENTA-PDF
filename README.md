@@ -51,8 +51,16 @@ Cada cambio queda anotado en la columna de la izquierda, y `Ctrl+Z` deshace.
 - Renglones que mezclan varias tipografías o tamaños: deja escribir, pero
   advierte antes, porque el renglón se reescribe con la tipografía de su
   primera letra.
-- Texto dentro de imágenes o de escaneos: ahí no hay letras que editar, hay
-  una foto. Para eso haría falta reconocimiento de caracteres.
+- **Escaneos.** Una hoja escaneada es una fotografía del papel: por dentro no
+  tiene letras, solo píxeles. El editor lo dice claramente al abrirla, en vez
+  de dejarla muda. Para escribir *encima* —una nota, un «COPIA FIEL», un
+  sello— está **Sello y marcas** en Grapa, que añade el texto sin tocar el
+  escaneo.
+
+  Reescribir lo que dice un escaneo es otra cosa: habría que borrar píxeles y
+  dibujar encima, y el resultado ya no sería copia fiel del papel que se
+  escaneó. En un expediente de contratación eso importa, así que el editor no
+  lo hace.
 - Borrar un renglón entero.
 - La tipografía que se escribe es la equivalente estándar (las catorce que
   todo lector de PDF trae de serie), no la copia incrustada del original.
@@ -72,6 +80,8 @@ node pruebas/editar.mjs       # edita y comprueba el resultado, servido
 node pruebas/suelto.mjs       # lo mismo con el archivo suelto, sin red
 node pruebas/subconjunto.mjs  # un PDF impreso por Chrome, con tipografías
                               # en subconjunto: negrita, cursiva, Times y Courier
+node pruebas/escaneo.mjs      # una hoja escaneada: que se explique, no que
+                              # se quede muda
 node pruebas/hacer-correo.mjs pruebas/correo.pdf   # rehace ese PDF de prueba
 ```
 
