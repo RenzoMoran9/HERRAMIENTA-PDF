@@ -54,19 +54,25 @@ Cada cambio queda anotado en la columna de la izquierda, y `Ctrl+Z` deshace.
 - Texto dentro de imágenes o de escaneos: ahí no hay letras que editar, hay
   una foto. Para eso haría falta reconocimiento de caracteres.
 - Borrar un renglón entero.
-- La tipografía que se escribe es la equivalente estándar (las catorce de
-  PDF), no la copia incrustada del original. En documentos corrientes
-  —Arial, Helvetica, Times— no se nota; en una tipografía rara, sí.
+- La tipografía que se escribe es la equivalente estándar (las catorce que
+  todo lector de PDF trae de serie), no la copia incrustada del original.
+  Se elige respetando **negrita, cursiva, gracias y monoespaciado**, y
+  cuando hay sustitución se dice cuál se usó en la lista de cambios. En
+  documentos corrientes —Arial, Calibri, Times— no se nota; en una
+  tipografía con personalidad, sí.
 
 ---
 
 ## Para desarrollar
 
 ```bash
-node servidor.mjs          # http://localhost:8123
-node construir.mjs         # genera GrapaEditor.html, el archivo suelto
-node pruebas/editar.mjs    # edita y comprueba el resultado, servido
-node pruebas/suelto.mjs    # lo mismo con el archivo suelto, sin red
+node servidor.mjs             # http://localhost:8123
+node construir.mjs            # genera GrapaEditor.html, el archivo suelto
+node pruebas/editar.mjs       # edita y comprueba el resultado, servido
+node pruebas/suelto.mjs       # lo mismo con el archivo suelto, sin red
+node pruebas/subconjunto.mjs  # un PDF impreso por Chrome, con tipografías
+                              # en subconjunto: negrita, cursiva, Times y Courier
+node pruebas/hacer-correo.mjs pruebas/correo.pdf   # rehace ese PDF de prueba
 ```
 
 ---

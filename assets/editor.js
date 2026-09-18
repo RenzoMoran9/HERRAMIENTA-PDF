@@ -67,7 +67,13 @@ function leerRenglones(pagina) {
     beginLine(bbox) { act = { bbox, letras: [] }; },
     onChar(c, origin, font, size, quad, color) {
       if (!act) return;
-      act.letras.push({ c, x: origin[0], y: origin[1], fuente: font.getName(), size, color });
+      act.letras.push({
+        c, x: origin[0], y: origin[1], size, color,
+        fuente: font.getName(),
+        // por si el nombre no sirve para nada: con esto se elige bien la equivalente
+        rasgos: { negrita: font.isBold(), cursiva: font.isItalic(),
+                  serif: font.isSerif(), mono: font.isMono() },
+      });
     },
     endLine() {
       if (act && act.letras.length) {
@@ -80,6 +86,7 @@ function leerRenglones(pagina) {
             x: l[0].x,
             y: l[0].y,
             fuente: l[0].fuente,
+            rasgos: l[0].rasgos,
             size: l[0].size,
             color: l[0].color,
             // una sola fuente y un solo tamaño en todo el renglón: se puede
@@ -92,6 +99,54 @@ function leerRenglones(pagina) {
     },
   });
   return salida;
+}
+
+/* ---------- elegir con qué tipografía se escribe ----------
+   Un PDF incrusta la tipografía en subconjunto y le pone delante seis
+   letras y un «+»: «BAAAAA+ArialMT». Y lo que queda suele ser el nombre
+   comercial —ArialMT, LiberationSans, Calibri—, no una de las catorce que
+   todo lector de PDF trae de serie, que son las únicas que se pueden pedir
+   por nombre. Hay que traducirlo, o no se puede escribir nada. */
+const PREFIJO_SUBCONJUNTO = /^[A-Z]{6}\+/;
+
+function familiaDe(nombre, rasgos) {
+  const n = String(nombre || '').replace(PREFIJO_SUBCONJUNTO, '').toLowerCase();
+  const r = rasgos || {};
+  if (r.mono || /courier|mono|consolas/.test(n)) return 'Courier';
+  if (!/sans/.test(n) && /times|serif|georgia|cambria|garamond|book|roman/.test(n)) return 'Times';
+  if (/arial|helvetica|sans|calibri|verdana|tahoma|segoe|roboto|liberation/.test(n)) return 'Helvetica';
+  if (r.serif) return 'Times';
+  return 'Helvetica';
+}
+
+function nombreDeSerie(familia, negrita, cursiva) {
+  if (familia === 'Times') {
+    if (negrita && cursiva) return 'Times-BoldItalic';
+    if (negrita) return 'Times-Bold';
+    if (cursiva) return 'Times-Italic';
+    return 'Times-Roman';
+  }
+  const cola = negrita && cursiva ? '-BoldOblique' : negrita ? '-Bold' : cursiva ? '-Oblique' : '';
+  return familia + cola;
+}
+
+/** Devuelve { fuente, nombre, sustituida } y nunca falla. */
+function resolverFuente(nombre, rasgos) {
+  // 1. tal cual: hay PDF que usan directamente una de las de serie
+  try { return { fuente: new Font(nombre), nombre, sustituida: false }; } catch (e) {}
+  // 2. sin el prefijo de subconjunto
+  const pelado = String(nombre || '').replace(PREFIJO_SUBCONJUNTO, '');
+  if (pelado && pelado !== nombre) {
+    try { return { fuente: new Font(pelado), nombre: pelado, sustituida: false }; } catch (e) {}
+  }
+  // 3. la equivalente de serie, con su mismo peso y su misma inclinación
+  const r = rasgos || {};
+  const negrita = r.negrita || /bold|black|heavy|semibold/i.test(pelado);
+  const cursiva = r.cursiva || /italic|oblique/i.test(pelado);
+  const equivale = nombreDeSerie(familiaDe(nombre, r), negrita, cursiva);
+  try { return { fuente: new Font(equivale), nombre: equivale, sustituida: true }; } catch (e) {}
+  // 4. lo más neutro que existe
+  return { fuente: new Font('Helvetica'), nombre: 'Helvetica', sustituida: true };
 }
 
 /* ---------- medir el ancho que ocupará un texto ---------- */
@@ -285,7 +340,7 @@ function aplicar(indice, textoNuevo) {
       pila.push({ bytes: respaldo, cambios: cambios.slice() });
       cambios.push({
         hoja: paginaActual, antes: r.texto, despues: textoNuevo,
-        encogido: resultado.encogido,
+        encogido: resultado.encogido, tipografia: resultado.tipografia,
       });
       $('#btnDeshacer').disabled = false;
       cargando(false);
@@ -319,7 +374,8 @@ function reescribir(indice, textoNuevo) {
   pagina.applyRedactions(false);
 
   // 2. volver a escribir el renglón completo, en su misma línea base
-  const fuente = new Font(r.fuente);
+  const elegida = resolverFuente(r.fuente, r.rasgos);
+  const fuente = elegida.fuente;
   const clave = 'GrapaEd' + (contadorFuente++);
   const refFuente = doc.addSimpleFont(fuente, 'Latin');
   const objPag = pagina.getObject();
@@ -375,7 +431,8 @@ function reescribir(indice, textoNuevo) {
 
   bytesActuales = salida;
   abrirBytes(salida, nombre);
-  return { ok: true, encogido, desvio };
+  return { ok: true, encogido, desvio,
+           tipografia: elegida.sustituida ? elegida.nombre : '' };
 }
 
 function pintarCambios() {
@@ -386,7 +443,9 @@ function pintarCambios() {
     const li = document.createElement('li');
     const donde = document.createElement('div');
     donde.className = 'donde';
-    donde.textContent = 'Hoja ' + (c.hoja + 1) + (c.encogido ? ' · ajustado al ' + c.encogido + ' %' : '');
+    donde.textContent = 'Hoja ' + (c.hoja + 1)
+      + (c.encogido ? ' · ajustado al ' + c.encogido + ' %' : '')
+      + (c.tipografia ? ' · escrito en ' + c.tipografia : '');
     const a = document.createElement('div'); a.className = 'antes'; a.textContent = c.antes;
     const b = document.createElement('div'); b.className = 'despues'; b.textContent = c.despues;
     li.append(donde, a, b);
