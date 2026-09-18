@@ -134,6 +134,16 @@ svg[class^="ico"], svg[class*=" ico"]{
 .cambios .antes{ color:var(--texto-3); text-decoration:line-through; word-break:break-word; }
 .cambios .despues{ color:var(--texto); word-break:break-word; }
 
+.reconocido{ margin-top:18px; padding-top:14px; border-top:1px solid var(--borde-suave); }
+.reconocido-texto{
+  width:100%; height:190px; margin:8px 0; resize:vertical;
+  font:12px/1.45 ui-monospace, "Cascadia Mono", Consolas, monospace;
+  color:var(--texto); background:var(--fondo); border:1px solid var(--borde);
+  border-radius:var(--radio-s); padding:8px;
+}
+.btn-suave{ width:100%; justify-content:center; }
+.cartel-escaneo .btn{ margin:2px 0 10px; }
+
 /* ---------- escena ---------- */
 .escena{ flex:1; min-width:0; overflow:auto; padding:24px; display:flex; }
 .escena.arrastrando{ outline:3px dashed var(--acento); outline-offset:-10px; background:var(--acento-tenue); }

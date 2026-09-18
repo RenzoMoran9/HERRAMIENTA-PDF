@@ -62,6 +62,9 @@ const antes = reng(original), despues = reng(editado);
 const viejo = antes.find((l) => l.text.includes(VIEJO));
 const nuevo = despues.find((l) => l.text.includes(NUEVO));
 
+const cabecera = new TextDecoder().decode(editado.slice(0, 5));
+if (cabecera !== '%PDF-') { console.error('CABECERA ROTA:', JSON.stringify(cabecera)); process.exitCode = 1; }
+else console.log('cabecera del PDF: correcta (%PDF-)');
 console.log('\n================ COMPROBACIÓN ================');
 console.log('renglones antes / después :', antes.length, '/', despues.length);
 console.log('el texto viejo sigue ahí  :', despues.some((l) => l.text.includes(VIEJO)));

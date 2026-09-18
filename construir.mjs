@@ -33,6 +33,31 @@ const marca = motor.split('\n').find((l) => l.startsWith('/*IMPORTA*/'));
 if (!marca) throw new Error('falta la línea marcada /*IMPORTA*/ en editor.js');
 motor = motor.replace(marca, '/* las clases de MuPDF ya están en este módulo */');
 
+/* --- el reconocimiento de texto: la biblioteca se mete dentro, y las tres
+       piezas pesadas (núcleo, trabajador y español) viajan en base64 --- */
+let ocr = leer('assets', 'ocr.js');
+const marcaOcr = ocr.split('\n').find((l) => l.startsWith('/*IMPORTA-OCR*/'));
+if (!marcaOcr) throw new Error('falta la línea marcada /*IMPORTA-OCR*/ en ocr.js');
+let biblioOcr = leer('lib', 'ocr', 'tesseract.esm.min.js');
+if (!/export\s*\{[^}]*\};?/.test(biblioOcr)) throw new Error('la biblioteca de OCR cambió de forma');
+biblioOcr = biblioOcr.replace(/export\s*\{[^}]*\};?/g, 'const T = tesseract_min;');
+ocr = ocr.replace(marcaOcr, biblioOcr);
+
+const enB64 = (...r) => fs.readFileSync(path.join(aqui, ...r)).toString('base64');
+const desde = (b) => 'Uint8Array.from(atob("' + b + '"), (c) => c.charCodeAt(0))';
+const i0 = ocr.indexOf('/*PIEZAS*/');
+const i1 = ocr.indexOf('let trabajador = null;');
+if (i0 < 0 || i1 < 0) throw new Error('no encuentro el hueco de las piezas en ocr.js');
+ocr = ocr.slice(0, i0) + 'async function piezas() {\n  return {\n'
+  + '    nucleo: ' + desde(enB64('lib', 'ocr', 'tesseract-core-simd-lstm.wasm.js')) + ',\n'
+  + '    trabajador: ' + desde(enB64('lib', 'ocr', 'worker.min.js')) + ',\n'
+  + '    idioma: ' + desde(enB64('lib', 'ocr', 'spa.traineddata.gz')) + ',\n'
+  + '  };\n}\n\n' + ocr.slice(i1);
+
+const marcaRec = motor.split('\n').find((l) => l.startsWith('/*IMPORTA-RECONOCER*/'));
+if (!marcaRec) throw new Error('falta la línea marcada /*IMPORTA-RECONOCER*/ en editor.js');
+motor = motor.replace(marcaRec, '/* reconocer() ya está en este módulo */');
+
 const estilos = leer('assets', 'editor.css');
 
 let pagina = leer('index.html');
@@ -46,6 +71,7 @@ pagina = pagina.replace(
   'globalThis["$libmupdf_wasm_Module"] = { wasmBinary: Uint8Array.from(atob("' + wasm64 + '"), (c) => c.charCodeAt(0)) };\n' +
   pegamento + '\n' +
   biblioteca + '\n' +
+  ocr + '\n' +
   motor + '\n' +
   '</script>'
 );

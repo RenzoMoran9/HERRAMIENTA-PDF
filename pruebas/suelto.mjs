@@ -47,6 +47,9 @@ const reng = (buf) => {
 const antes = reng(fs.readFileSync(path.join(RAIZ, 'pruebas', 'postores.pdf')));
 const despues = reng(editado);
 const v = antes.find((l) => l.text.includes(VIEJO)), n = despues.find((l) => l.text.includes(NUEVO));
+const cabecera = new TextDecoder().decode(editado.slice(0, 5));
+if (cabecera !== '%PDF-') { console.error('CABECERA ROTA:', JSON.stringify(cabecera)); process.exitCode = 1; }
+else console.log('cabecera del PDF: correcta (%PDF-)');
 console.log('\n=========== COMPROBACIÓN (suelto) ===========');
 console.log('renglones antes / después:', antes.length, '/', despues.length);
 console.log('el importe viejo sigue   :', despues.some((l) => l.text.includes(VIEJO)));

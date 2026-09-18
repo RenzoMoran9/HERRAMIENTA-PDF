@@ -51,16 +51,11 @@ Cada cambio queda anotado en la columna de la izquierda, y `Ctrl+Z` deshace.
 - Renglones que mezclan varias tipografías o tamaños: deja escribir, pero
   advierte antes, porque el renglón se reescribe con la tipografía de su
   primera letra.
-- **Escaneos.** Una hoja escaneada es una fotografía del papel: por dentro no
-  tiene letras, solo píxeles. El editor lo dice claramente al abrirla, en vez
-  de dejarla muda. Para escribir *encima* —una nota, un «COPIA FIEL», un
-  sello— está **Sello y marcas** en Grapa, que añade el texto sin tocar el
-  escaneo.
-
-  Reescribir lo que dice un escaneo es otra cosa: habría que borrar píxeles y
-  dibujar encima, y el resultado ya no sería copia fiel del papel que se
-  escaneó. En un expediente de contratación eso importa, así que el editor no
-  lo hace.
+- **Corregir lo que dice un escaneo.** Habría que borrar píxeles y dibujar
+  encima, y el resultado ya no sería copia fiel del papel que se escaneó. En
+  un expediente de contratación eso importa, así que el editor no lo hace.
+  Para escribir *encima* —una nota, un «COPIA FIEL», un sello— está
+  **Sello y marcas** en Grapa, que añade el texto sin tocar el escaneo.
 - Borrar un renglón entero.
 - La tipografía que se escribe es la equivalente estándar (las catorce que
   todo lector de PDF trae de serie), no la copia incrustada del original.
@@ -68,6 +63,29 @@ Cada cambio queda anotado en la columna de la izquierda, y `Ctrl+Z` deshace.
   cuando hay sustitución se dice cuál se usó en la lista de cambios. En
   documentos corrientes —Arial, Calibri, Times— no se nota; en una
   tipografía con personalidad, sí.
+
+---
+
+## Escaneos: reconocer el texto
+
+Una hoja escaneada es una fotografía del papel: por dentro no tiene letras,
+solo píxeles. El editor lo dice al abrirla y ofrece **Reconocer el texto**.
+
+Lo que hace es leer la foto y dejar lo leído en una **capa de texto invisible**,
+palabra por palabra y cada una en su sitio. La foto **no se toca** —la prueba
+lo comprueba píxel a píxel—, pero el PDF pasa a poder **buscarse y copiarse**,
+también fuera de aquí: en Acrobat, en el gestor documental, donde sea.
+
+Va en español, tarda un par de segundos por hoja, y funciona **sin internet**:
+el motor y el idioma viajan dentro del propio archivo.
+
+Una hoja ya reconocida queda marcada y **no se vuelve corregible**. No es una
+manera de decir que no: si se corrigiera esa capa, la foto seguiría diciendo lo
+de antes y el documento mostraría una cifra y copiaría otra. Eso no es un
+documento corregido, es un documento roto.
+
+El reconocimiento se equivoca a veces —confunde `I` con `l`, sobre todo—, así
+que conviene mirarlo antes de fiarse. El editor dice con qué confianza leyó.
 
 ---
 
@@ -82,6 +100,10 @@ node pruebas/subconjunto.mjs  # un PDF impreso por Chrome, con tipografías
                               # en subconjunto: negrita, cursiva, Times y Courier
 node pruebas/escaneo.mjs      # una hoja escaneada: que se explique, no que
                               # se quede muda
+node pruebas/reconocer.mjs    # reconocer un escaneo: texto buscable donde no
+                              # había nada, y la foto intacta píxel a píxel
+node pruebas/suelto-ocr.mjs   # lo mismo desde el disco, con el navegador sin red
+node pruebas/hacer-escaneo.mjs pruebas/postores.pdf pruebas/escaneo.pdf
 node pruebas/hacer-correo.mjs pruebas/correo.pdf   # rehace ese PDF de prueba
 ```
 
@@ -91,7 +113,9 @@ node pruebas/hacer-correo.mjs pruebas/correo.pdf   # rehace ese PDF de prueba
 
 Este programa es **software libre bajo la [AGPL-3.0-or-later](LICENSE)**, porque
 usa [MuPDF](https://mupdf.com) de Artifex Software, que se distribuye con esa
-licencia.
+licencia. El reconocimiento de texto usa
+[Tesseract](https://github.com/naptha/tesseract.js), que es Apache-2.0 y por
+tanto compatible; sus avisos están en [`lib/ocr/AVISOS.txt`](lib/ocr/AVISOS.txt).
 
 En corto: puedes usarlo, copiarlo y modificarlo libremente. Si repartes una
 versión modificada —o la pones en una web para que otros la usen— tienes que

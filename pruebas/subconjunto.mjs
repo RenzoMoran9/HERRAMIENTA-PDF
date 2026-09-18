@@ -55,6 +55,9 @@ const texto = (b) => {
   const d = mupdf.PDFDocument.openDocument(new Uint8Array(b), 'application/pdf');
   return d.loadPage(0).toStructuredText('preserve-whitespace').asText();
 };
+ok('el PDF sale entero, con su cabecera intacta',
+   new TextDecoder().decode(editado.slice(0, 5)) === '%PDF-',
+   JSON.stringify(new TextDecoder().decode(editado.slice(0, 9))));
 const antes = texto(fs.readFileSync(ORIGEN)), despues = texto(editado);
 console.log('\n=============== COMPROBACIÓN ===============');
 for (const [viejo, nuevo, que] of casos) {

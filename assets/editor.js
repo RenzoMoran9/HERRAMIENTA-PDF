@@ -5,6 +5,7 @@
    =========================================================== */
 
 /*IMPORTA*/ import { PDFDocument, Font, Buffer, Matrix, ColorSpace } from '../lib/mupdf.js';
+/*IMPORTA-RECONOCER*/ import { reconocer } from './ocr.js';
 
 const $ = (s) => document.querySelector(s);
 
@@ -20,6 +21,7 @@ let pila = [];              // para deshacer: { bytes, nombre, resumen }
 let cambios = [];           // lo que se le muestra al usuario
 let contadorFuente = 0;
 let grapa = null;           // la ventana de Grapa, si vino de allí
+const reconocidos = new Map();  // lo que dijo el OCR, por hoja
 
 /* ---------- utilidades de pantalla ---------- */
 function avisar(texto, tipo) {
@@ -56,6 +58,18 @@ function marcoDe(pagina) {
     if (rot && rot.isNumber()) giro = ((rot.asNumber() % 360) + 360) % 360;
   } catch (e) { /* nos quedamos con los límites de la página */ }
   return { x0, y1, giro, ancho: lim[2] - lim[0], alto: lim[3] - lim[1] };
+}
+
+/* ---------- ¿esta hoja lleva texto reconocido? ----------
+   Al reconocer una hoja se le deja una marca dentro, para saberlo también
+   la próxima vez que se abra el archivo. El texto reconocido se puede
+   buscar y copiar, pero no corregir: la foto seguiría diciendo lo de
+   antes, y el documento mostraría una cosa y copiaría otra. */
+function llevaOCR(pagina) {
+  try {
+    const m = pagina.getObject().get('GrapaOCR');
+    return !!(m && m.asBoolean && m.asBoolean());
+  } catch (e) { return false; }
 }
 
 /* ---------- leer los renglones de una hoja ---------- */
@@ -159,6 +173,18 @@ function medirAncho(fuente, texto, tam) {
   return suma * tam;
 }
 
+/* ---------- sacar los bytes del documento ----------
+   `asUint8Array()` no devuelve una copia: devuelve una VENTANA a la memoria
+   del motor. En cuanto algo reserva memoria después —volver a abrir el
+   documento, por ejemplo— esos bytes se pisan, y el PDF sale con la cabecera
+   destrozada. Hay que copiarlos en el acto. */
+function bytesDe(documento) {
+  const buf = documento.saveToBuffer('');
+  const copia = new Uint8Array(buf.asUint8Array());   // el constructor copia
+  try { buf.destroy(); } catch (e) {}
+  return copia;
+}
+
 /* ---------- escapar una cadena para el flujo del PDF ---------- */
 function escapar(texto) {
   return texto
@@ -195,7 +221,7 @@ function abrirBytes(bytes, comoSeLlama) {
 
 function estrenarDocumento(bytes, comoSeLlama) {
   paginaActual = 0;
-  pila = []; cambios = []; contadorFuente = 0;
+  pila = []; cambios = []; contadorFuente = 0; reconocidos.clear();
   if (!abrirBytes(bytes, comoSeLlama)) return;
   $('#vacio').hidden = true;
   $('#paginador').hidden = false;
@@ -243,22 +269,32 @@ function dibujar() {
   renglones = leerRenglones(pagina);
   pintarRenglones();
 
-  // Una hoja escaneada no tiene letras dentro, solo píxeles. Antes se
-  // quedaba la hoja ahí, muda, con un «0 renglones» que parecía una avería.
-  const esEscaneo = renglones.length === 0;
+  // Una hoja puede estar de tres maneras: con texto de verdad (se corrige),
+  // escaneada y muda (se puede reconocer), o escaneada y ya reconocida (se
+  // busca y se copia, pero no se corrige: la foto seguiría diciendo lo de
+  // antes y el documento mostraría una cosa y copiaría otra).
+  const conOCR = llevaOCR(pagina);
+  const esEscaneo = renglones.length === 0 && !conOCR;
+  if (conOCR) { renglones = []; capaRenglones(); }
   $('#cartelEscaneo').hidden = !esEscaneo;
   $('#hojaEnvoltura').hidden = esEscaneo;
+  pintarReconocido(conOCR);
+  pintarCambios();
 
   $('#pagEtiqueta').textContent = (paginaActual + 1) + ' / ' + totalPaginas;
   $('#pagAnterior').disabled = paginaActual === 0;
   $('#pagSiguiente').disabled = paginaActual >= totalPaginas - 1;
   $('#docNombre').textContent = nombre;
   const marco = marcoDe(pagina);
+  const comoEsta = conOCR ? 'esta es un escaneo ya reconocido'
+    : esEscaneo ? 'esta es un escaneo'
+    : renglones.length + ' renglones en esta';
   $('#docDetalle').textContent =
-    totalPaginas + (totalPaginas === 1 ? ' hoja' : ' hojas') +
-    ' · ' + (esEscaneo ? 'esta es un escaneo' : renglones.length + ' renglones en esta') +
+    totalPaginas + (totalPaginas === 1 ? ' hoja' : ' hojas') + ' · ' + comoEsta +
     (marco.giro ? ' · hoja girada ' + marco.giro + '°' : '');
 }
+
+function capaRenglones() { $('#renglones').textContent = ''; }
 
 function pintarRenglones() {
   const capa = $('#renglones');
@@ -321,6 +357,107 @@ function editar(indice) {
   campoAbierto = campo;
   campo.focus();
   campo.select();
+}
+
+/* ---------- reconocer el texto de una hoja escaneada ----------
+   Se lee la foto y se le pone encima una capa de texto INVISIBLE, palabra
+   por palabra y cada una en su sitio. La foto no se toca: lo que se ve
+   sigue siendo exactamente el papel que se escaneó. Lo que se gana es que
+   el PDF pasa a poder buscarse y copiarse, también fuera de aquí. */
+const PPP_OCR = 200;
+
+async function reconocerHoja() {
+  if (!doc) return;
+  const pagina = doc.loadPage(paginaActual);
+  const marco = marcoDe(pagina);
+  const escala = PPP_OCR / 72;
+
+  cargando(true, 'Preparando el reconocimiento…');
+  try {
+    const pix = pagina.toPixmap(Matrix.scale(escala, escala), ColorSpace.DeviceRGB, false, true);
+    const foto = new Blob([pix.asPNG()], { type: 'image/png' });
+    pix.destroy();
+
+    const t0 = performance.now();
+    const salida = await reconocer(foto, (estado, avance) => {
+      const nombres = {
+        'loading tesseract core': 'Cargando el motor…',
+        'initializing tesseract': 'Arrancando el motor…',
+        'loading language traineddata': 'Cargando el español…',
+        'initializing api': 'Casi listo…',
+        'recognizing text': 'Leyendo la hoja…',
+      };
+      const t = nombres[estado] || estado;
+      cargando(true, t + (avance ? ' ' + Math.round(avance * 100) + '%' : ''));
+    });
+    const ms = Math.round(performance.now() - t0);
+
+    if (!salida.palabras.length) {
+      cargando(false);
+      avisar('No se reconoció ninguna palabra en esta hoja.', 'mal');
+      return;
+    }
+
+    const respaldo = bytesActuales;
+    cargando(true, 'Poniendo el texto encima de la foto…');
+    const bytes = escribirCapaOCR(pagina, salida.palabras, escala, marco);
+    if (!bytes) { abrirBytes(respaldo, nombre); cargando(false); avisar('No se pudo escribir el texto.', 'mal'); return; }
+
+    pila.push({ bytes: respaldo, cambios: cambios.slice() });
+    $('#btnDeshacer').disabled = false;
+    bytesActuales = bytes;
+    abrirBytes(bytes, nombre);
+    reconocidos.set(paginaActual, {
+      texto: salida.texto, confianza: Math.round(salida.confianza),
+      palabras: salida.palabras.length, ms,
+    });
+    cargando(false);
+    dibujar();
+    avisar(`Reconocidas ${salida.palabras.length} palabras (${Math.round(salida.confianza)} % de confianza) en ${(ms / 1000).toFixed(1)} s.`, 'bien');
+  } catch (e) {
+    console.error(e);
+    cargando(false);
+    avisar('No se pudo reconocer: ' + e.message, 'mal');
+  }
+}
+
+function escribirCapaOCR(pagina, palabras, escala, marco) {
+  const fuente = new Font('Helvetica');
+  const clave = 'GrapaOCR';
+  const refFuente = doc.addSimpleFont(fuente, 'Latin');
+  const objPag = pagina.getObject();
+  let rec = objPag.get('Resources');
+  if (!rec.isDictionary()) { rec = doc.addObject(doc.newDictionary()); objPag.put('Resources', rec); }
+  let fuentes = rec.get('Font');
+  if (!fuentes.isDictionary()) { fuentes = doc.addObject(doc.newDictionary()); rec.put('Font', fuentes); }
+  fuentes.put(clave, refFuente);
+
+  const buf = new Buffer();
+  let puestas = 0;
+  for (const w of palabras) {
+    const ancho = (w.x1 - w.x0) / escala;
+    const alto = (w.y1 - w.y0) / escala;
+    if (ancho <= 0.5 || alto <= 0.5) continue;
+    const tam = alto;
+    const natural = medirAncho(fuente, w.texto, tam);
+    // se estira o encoge cada palabra para que su recuadro coincida con el
+    // de la foto: así lo que se selecciona es lo que se ve
+    const tz = natural > 0.01 ? Math.max(5, Math.min(900, (ancho / natural) * 100)) : 100;
+    const x = w.x0 / escala + marco.x0;
+    const y = marco.y1 - w.y1 / escala;
+    buf.writeLine('q BT 3 Tr /' + clave + ' ' + tam.toFixed(2) + ' Tf ' + tz.toFixed(2)
+      + ' Tz 1 0 0 1 ' + x.toFixed(2) + ' ' + y.toFixed(2) + ' Tm ('
+      + escapar(w.texto) + ') Tj ET Q');
+    puestas++;
+  }
+  if (!puestas) return null;
+
+  const refFlujo = doc.addStream(buf, {});
+  let cont = objPag.get('Contents');
+  if (cont.isArray()) { cont.push(refFlujo); }
+  else { const arr = doc.newArray(); arr.push(cont); arr.push(refFlujo); objPag.put('Contents', arr); }
+  objPag.put('GrapaOCR', doc.newBoolean(true));   // la marca, para reconocerlo después
+  return bytesDe(doc);
 }
 
 /* ---------- el cambio de verdad ---------- */
@@ -415,7 +552,7 @@ function reescribir(indice, textoNuevo) {
   else { const arr = doc.newArray(); arr.push(cont); arr.push(refFlujo); objPag.put('Contents', arr); }
 
   // 3. comprobar el resultado antes de darlo por bueno
-  const salida = doc.saveToBuffer('').asUint8Array();
+  const salida = bytesDe(doc);
   const comprobar = PDFDocument.openDocument(salida, 'application/pdf');
   const nuevos = leerRenglones(comprobar.loadPage(paginaActual));
   const puesto = nuevos.find((x) => x.texto.trim() === textoNuevo.trim());
@@ -443,7 +580,8 @@ function reescribir(indice, textoNuevo) {
 function pintarCambios() {
   const lista = $('#cambios');
   lista.textContent = '';
-  $('#pistaCambios').hidden = cambios.length > 0;
+  // invitar a pulsar un renglón cuando no hay ninguno que pulsar despista
+  $('#pistaCambios').hidden = cambios.length > 0 || renglones.length === 0;
   cambios.forEach((c) => {
     const li = document.createElement('li');
     const donde = document.createElement('div');
@@ -456,6 +594,21 @@ function pintarCambios() {
     li.append(donde, a, b);
     lista.appendChild(li);
   });
+}
+
+function pintarReconocido(conOCR) {
+  const caja = $('#reconocido');
+  const r = reconocidos.get(paginaActual);
+  caja.hidden = !conOCR;
+  if (!conOCR) return;
+  $('#reconocidoResumen').textContent = r
+    ? `${r.palabras} palabras · ${r.confianza} % de confianza · ${(r.ms / 1000).toFixed(1)} s. `
+      + 'Ya se puede buscar y copiar en el PDF. No se corrige: la foto seguiría diciendo lo de antes.'
+    : 'Esta hoja ya lleva texto reconocido: se puede buscar y copiar, pero no corregir, '
+      + 'porque la foto seguiría diciendo lo de antes.';
+  $('#reconocidoTexto').value = r ? r.texto.trim() : '(reconocido en otro momento)';
+  $('#reconocidoTexto').hidden = !r;
+  $('#btnCopiarTexto').hidden = !r;
 }
 
 function deshacer() {
@@ -518,6 +671,16 @@ $('#archivo').addEventListener('change', (e) => { leerArchivo(e.target.files[0])
 $('#btnDescargar').addEventListener('click', descargar);
 $('#btnDevolver').addEventListener('click', devolver);
 $('#btnDeshacer').addEventListener('click', deshacer);
+$('#btnReconocer').addEventListener('click', reconocerHoja);
+$('#btnCopiarTexto').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText($('#reconocidoTexto').value);
+    avisar('Copiado.', 'bien');
+  } catch (e) {
+    $('#reconocidoTexto').select();          // sin permiso de portapapeles, al menos queda marcado
+    avisar('Selecciónalo y copia con Ctrl+C.', '');
+  }
+});
 $('#pagAnterior').addEventListener('click', () => { if (paginaActual > 0) { paginaActual--; cerrarCampo(); dibujar(); } });
 $('#pagSiguiente').addEventListener('click', () => { if (paginaActual < totalPaginas - 1) { paginaActual++; cerrarCampo(); dibujar(); } });
 $('#zoom').addEventListener('input', (e) => { escala = Number(e.target.value) / 100; cerrarCampo(); if (doc) dibujar(); });
