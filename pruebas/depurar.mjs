@@ -1,0 +1,21 @@
+import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
+import { spawn } from 'node:child_process';
+import path from 'node:path';
+
+const RAIZ = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const PUERTO = 8322;
+const srv = spawn('/opt/node22/bin/node', [path.join(RAIZ, 'servidor.mjs')], { env: { ...process.env, PUERTO } });
+await new Promise((r) => setTimeout(r, 700));
+const nav = await chromium.launch({ executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
+const pag = await nav.newPage();
+pag.on('pageerror', (e) => console.log('!! pageerror:', e.message, '\n', (e.stack||'').split('\n').slice(0,4).join('\n')));
+pag.on('console', (m) => console.log('[' + m.type() + ']', m.text()));
+await pag.goto(`http://127.0.0.1:${PUERTO}/`);
+await pag.waitForFunction('window.grapaEditorListo === true', null, { timeout: 30000 }).catch(() => console.log('!! no llegó a listo'));
+await pag.setInputFiles('#archivo', path.join(RAIZ, 'pruebas', 'postores.pdf'));
+await new Promise((r) => setTimeout(r, 3000));
+console.log('vacio oculto:', await pag.evaluate(() => document.querySelector('#vacio').hidden));
+console.log('renglones:', await pag.locator('.renglon').count());
+console.log('avisos:', (await pag.textContent('#avisos')).trim() || '(ninguno)');
+console.log('lienzo:', await pag.evaluate(() => { const c = document.querySelector('#lienzo'); return c.width + 'x' + c.height; }));
+await nav.close(); srv.kill();

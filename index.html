@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="es" data-tema="">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grapa · Editor de texto</title>
+<link rel="stylesheet" href="assets/editor.css">
+</head>
+<body>
+
+<!-- Saludo inmediato a quien nos haya abierto (Grapa), antes de cargar el
+     motor: así sabe que aquí sí hay un editor y que solo está arrancando.
+     Va en un script normal porque los módulos esperan a sus importaciones. -->
+<script>
+  try { if (window.opener) window.opener.postMessage({ grapa: 'editor-arrancando' }, '*'); }
+  catch (e) { /* abierto suelto */ }
+</script>
+
+<svg class="sprite" aria-hidden="true"><defs>
+  <g id="i-abrir"><path d="M4 20a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h4.5l2 3H18a2 2 0 0 1 2 2v1"/><path d="m3.4 20 2.3-7.2a1 1 0 0 1 1-.8h14.1a1 1 0 0 1 1 1.3L19.5 20Z"/></g>
+  <g id="i-guardar"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M3.5 17v2a2 2 0 0 0 2 2h13a2 2 0 0 0 2-2v-2"/></g>
+  <g id="i-volver"><path d="m15 18-6-6 6-6"/><path d="M21 12H9.5"/></g>
+  <g id="i-arriba"><path d="m6 15 6-6 6 6"/></g>
+  <g id="i-abajo"><path d="m6 9 6 6 6-6"/></g>
+  <g id="i-texto"><path d="M5 6.5V5h14v1.5"/><path d="M12 5v14"/><path d="M9 19h6"/></g>
+  <g id="i-deshacer"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></g>
+  <g id="i-tema"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18Z" fill="currentColor" stroke="none"/></g>
+  <g id="i-cerrar"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></g>
+  <g id="i-check"><path d="m5 13 4.5 4.5L19 8"/></g>
+  <g id="i-aviso"><path d="M12 3.5 22 20H2Z"/><path d="M12 10v4.5"/><path d="M12 17.2v.3"/></g>
+</defs></svg>
+
+<header class="barra">
+  <div class="marca">
+    <svg class="ico ico-marca" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-texto"/></svg>
+    <span class="marca-txt">Grapa · <b>Editor</b></span>
+  </div>
+
+  <div class="doc-info">
+    <strong id="docNombre">Ningún documento</strong>
+    <span id="docDetalle"></span>
+  </div>
+
+  <div class="barra-acciones">
+    <div class="paginador" id="paginador" hidden>
+      <button class="btn btn-mini" id="pagAnterior" title="Hoja anterior" aria-label="Hoja anterior"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-arriba"/></svg></button>
+      <span id="pagEtiqueta">1 / 1</span>
+      <button class="btn btn-mini" id="pagSiguiente" title="Hoja siguiente" aria-label="Hoja siguiente"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-abajo"/></svg></button>
+    </div>
+    <label class="zoom">Tamaño <input type="range" id="zoom" min="50" max="300" value="120"></label>
+    <button class="btn" id="btnAbrir"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-abrir"/></svg> Abrir</button>
+    <button class="btn" id="btnDeshacer" disabled><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-deshacer"/></svg> Deshacer</button>
+    <button class="btn btn-primario" id="btnDevolver" hidden><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-volver"/></svg> Devolver a Grapa</button>
+    <button class="btn" id="btnDescargar" disabled><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-guardar"/></svg> Descargar</button>
+    <button class="btn btn-icono" id="btnTema" title="Cambiar el tema" aria-label="Cambiar el tema"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-tema"/></svg></button>
+  </div>
+</header>
+
+<main class="cuerpo">
+  <aside class="lateral" id="lateral">
+    <h2 class="lateral-titulo">Cambios</h2>
+    <p class="pista" id="pistaCambios">Haz clic sobre cualquier renglón de la hoja para corregir su texto.</p>
+    <ol class="cambios" id="cambios"></ol>
+  </aside>
+
+  <section class="escena" id="escena">
+    <div class="vacio" id="vacio">
+      <svg class="ico ico-vacio" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-abrir"/></svg>
+      <h1>Arrastra un PDF aquí</h1>
+      <p>O pulsa <b>Abrir</b>. También puedes mandarlo desde Grapa y volverá corregido.</p>
+    </div>
+    <div class="hoja-envoltura" id="hojaEnvoltura" hidden>
+      <div class="hoja" id="hoja">
+        <canvas id="lienzo"></canvas>
+        <div class="renglones" id="renglones"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<div class="capa-carga" id="capaCarga" hidden><div class="tarjeta-carga"><div class="giro"></div><span id="cargaTexto">Preparando…</span></div></div>
+<div class="avisos" id="avisos" role="status" aria-live="polite"></div>
+<input type="file" id="archivo" accept="application/pdf,.pdf" hidden>
+
+<footer class="pie">
+  Grapa Editor usa <a href="https://mupdf.com" target="_blank" rel="noopener">MuPDF</a> de Artifex Software · programa libre bajo <a href="LICENSE" target="_blank" rel="noopener">AGPL-3.0-or-later</a> ·
+  <a href="https://github.com/RenzoMoran9/HERRAMIENTA-PDF" target="_blank" rel="noopener">código fuente</a>
+</footer>
+
+<script type="module" src="assets/editor.js"></script>
+</body>
+</html>

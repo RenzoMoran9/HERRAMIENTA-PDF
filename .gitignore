@@ -1,0 +1,14 @@
+# Nunca deben subirse documentos al repositorio
+*.pdf
+*.PDF
+*.docx
+*.xlsx
+*.jpg
+*.jpeg
+*.png
+*.zip
+
+# excepto los archivos de prueba, que no tienen datos reales
+!pruebas/postores.pdf
+
+node_modules/

@@ -1,0 +1,227 @@
+/* ===========================================================
+   Grapa · Editor de texto
+   Mismos colores y proporciones que Grapa, para que se sienta
+   una sola herramienta aunque sean dos programas.
+   =========================================================== */
+
+:root{
+  --fondo:#f4f5f7;
+  --fondo-2:#ffffff;
+  --fondo-3:#eceef2;
+  --borde:#d8dbe2;
+  --borde-suave:#e6e8ee;
+  --texto:#1b1f27;
+  --texto-2:#5c6472;
+  --texto-3:#8a91a0;
+  --acento:#e0532f;
+  --acento-oscuro:#c2411f;
+  --acento-tenue:#fdece7;
+  --azul:#2f6fed;
+  --verde:#1f9d64;
+  --rojo:#d33b28;
+  --sombra:0 1px 2px rgba(18,22,30,.06), 0 6px 20px rgba(18,22,30,.07);
+  --sombra-fuerte:0 18px 50px rgba(18,22,30,.22);
+  --radio:10px;
+  --radio-s:7px;
+  --lateral-ancho:270px;
+  --barra-alto:56px;
+}
+
+@media (prefers-color-scheme: dark){
+  :root:not([data-tema="claro"]):not([data-theme="light"]){
+    --fondo:#0f1319; --fondo-2:#171c24; --fondo-3:#1e242e;
+    --borde:#2b3341; --borde-suave:#232a35;
+    --texto:#e8ecf2; --texto-2:#9aa4b4; --texto-3:#6c7686;
+    --acento:#ff6a42; --acento-oscuro:#e0532f; --acento-tenue:#2a1a15;
+    --azul:#5b91ff; --verde:#35c184; --rojo:#ff6a54;
+    --sombra:0 1px 2px rgba(0,0,0,.35), 0 6px 20px rgba(0,0,0,.32);
+    --sombra-fuerte:0 18px 50px rgba(0,0,0,.55);
+  }
+}
+:root[data-tema="oscuro"]{
+  --fondo:#0f1319; --fondo-2:#171c24; --fondo-3:#1e242e;
+  --borde:#2b3341; --borde-suave:#232a35;
+  --texto:#e8ecf2; --texto-2:#9aa4b4; --texto-3:#6c7686;
+  --acento:#ff6a42; --acento-oscuro:#e0532f; --acento-tenue:#2a1a15;
+  --azul:#5b91ff; --verde:#35c184; --rojo:#ff6a54;
+  --sombra:0 1px 2px rgba(0,0,0,.35), 0 6px 20px rgba(0,0,0,.32);
+  --sombra-fuerte:0 18px 50px rgba(0,0,0,.55);
+}
+
+*{ box-sizing:border-box; }
+/* `hidden` tiene que ganarle a display:flex y compañía, o los paneles
+   escondidos se quedan interceptando los clics de toda la página */
+[hidden]{ display:none !important; }
+html,body{ height:100%; }
+body{
+  margin:0;
+  font:15px/1.5 "Segoe UI", system-ui, -apple-system, Roboto, Arial, sans-serif;
+  color:var(--texto);
+  background:var(--fondo);
+  display:flex; flex-direction:column;
+  overflow:hidden;
+}
+.sprite{ position:absolute; width:0; height:0; }
+svg[class^="ico"], svg[class*=" ico"]{
+  width:18px; height:18px; flex:none;
+  fill:none; stroke:currentColor; stroke-width:2;
+  stroke-linecap:round; stroke-linejoin:round;
+}
+
+/* ---------- barra superior ---------- */
+.barra{
+  height:var(--barra-alto); flex:none;
+  display:flex; align-items:center; gap:14px;
+  padding:0 14px;
+  background:var(--fondo-2);
+  border-bottom:1px solid var(--borde);
+  box-shadow:var(--sombra);
+  z-index:10;
+}
+.marca{ display:flex; align-items:center; gap:8px; color:var(--acento); }
+.ico-marca{ width:22px; height:22px; }
+.marca-txt{ font-size:15px; color:var(--texto); white-space:nowrap; }
+.marca-txt b{ font-weight:700; }
+
+.doc-info{ min-width:0; display:flex; flex-direction:column; line-height:1.25; }
+.doc-info strong{
+  display:block; max-width:340px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  font-size:14px;
+}
+.doc-info span{ font-size:12px; color:var(--texto-3); }
+
+.barra-acciones{ margin-left:auto; display:flex; align-items:center; gap:8px; }
+
+.btn{
+  display:inline-flex; align-items:center; gap:6px;
+  padding:7px 12px; font:inherit; font-size:13.5px;
+  color:var(--texto); background:var(--fondo-2);
+  border:1px solid var(--borde); border-radius:var(--radio-s);
+  cursor:pointer; white-space:nowrap;
+  transition:background .12s, border-color .12s, transform .06s;
+}
+.btn:hover:not(:disabled){ background:var(--fondo-3); border-color:var(--texto-3); }
+.btn:active:not(:disabled){ transform:translateY(1px); }
+.btn:disabled{ opacity:.45; cursor:default; }
+.btn-primario{ background:var(--acento); border-color:var(--acento); color:#fff; }
+.btn-primario:hover:not(:disabled){ background:var(--acento-oscuro); border-color:var(--acento-oscuro); }
+.btn-mini{ padding:5px 7px; }
+.btn-icono{ padding:7px; }
+
+.paginador{ display:flex; align-items:center; gap:5px; font-size:13px; color:var(--texto-2); }
+.paginador span{ min-width:54px; text-align:center; font-variant-numeric:tabular-nums; }
+.zoom{ display:flex; align-items:center; gap:7px; font-size:13px; color:var(--texto-2); }
+.zoom input{ width:104px; accent-color:var(--acento); }
+
+/* ---------- cuerpo ---------- */
+.cuerpo{ flex:1; display:flex; min-height:0; }
+
+.lateral{
+  width:var(--lateral-ancho); flex:none;
+  background:var(--fondo-2); border-right:1px solid var(--borde);
+  padding:16px 14px; overflow-y:auto;
+}
+.lateral-titulo{ margin:0 0 8px; font-size:12px; letter-spacing:.08em; text-transform:uppercase; color:var(--texto-3); }
+.pista{ margin:0; font-size:13px; color:var(--texto-2); }
+
+.cambios{ list-style:none; margin:10px 0 0; padding:0; display:flex; flex-direction:column; gap:7px; }
+.cambios li{
+  border:1px solid var(--borde-suave); border-radius:var(--radio-s);
+  background:var(--fondo); padding:8px 10px; font-size:12.5px;
+}
+.cambios .donde{ color:var(--texto-3); font-size:11px; text-transform:uppercase; letter-spacing:.05em; }
+.cambios .antes{ color:var(--texto-3); text-decoration:line-through; word-break:break-word; }
+.cambios .despues{ color:var(--texto); word-break:break-word; }
+
+/* ---------- escena ---------- */
+.escena{ flex:1; min-width:0; overflow:auto; padding:24px; display:flex; }
+.escena.arrastrando{ outline:3px dashed var(--acento); outline-offset:-10px; background:var(--acento-tenue); }
+
+.vacio{ margin:auto; text-align:center; color:var(--texto-2); max-width:420px; }
+.ico-vacio{ width:46px; height:46px; color:var(--texto-3); stroke-width:1.5; }
+.vacio h1{ margin:12px 0 6px; font-size:19px; color:var(--texto); font-weight:600; }
+.vacio p{ margin:0; font-size:14px; }
+
+.hoja-envoltura{ margin:auto; }
+.hoja{
+  position:relative; line-height:0;
+  background:#fff; box-shadow:var(--sombra-fuerte); border-radius:2px;
+}
+.hoja canvas{ display:block; border-radius:2px; }
+
+.renglones{ position:absolute; inset:0; }
+.renglon{
+  position:absolute; cursor:text; border-radius:2px;
+  border:1px solid transparent;
+  transition:background .1s, border-color .1s;
+}
+.renglon:hover{ background:rgba(47,111,237,.13); border-color:var(--azul); }
+.renglon.cambiado{ background:rgba(31,157,100,.14); border-color:var(--verde); }
+
+/* el campo de edición se coloca justo encima del renglón */
+.campo{
+  position:absolute; z-index:5;
+  border:2px solid var(--acento); border-radius:3px;
+  background:var(--fondo-2); color:var(--texto);
+  font-family:inherit; padding:2px 4px; margin:0;
+  box-shadow:var(--sombra-fuerte);
+  line-height:1.15;
+}
+.campo:focus{ outline:none; }
+.campo-ayuda{
+  position:absolute; z-index:5;
+  background:var(--texto); color:var(--fondo-2);
+  font-size:11.5px; padding:3px 7px; border-radius:4px;
+  white-space:nowrap; pointer-events:none;
+}
+
+/* ---------- carga y avisos ---------- */
+.capa-carga{
+  position:fixed; inset:0; z-index:90;
+  background:rgba(12,16,22,.45);
+  display:flex; align-items:center; justify-content:center;
+}
+.tarjeta-carga{
+  display:flex; align-items:center; gap:12px;
+  background:var(--fondo-2); color:var(--texto);
+  padding:16px 22px; border-radius:var(--radio); box-shadow:var(--sombra-fuerte);
+  font-size:14px;
+}
+.giro{
+  width:19px; height:19px; flex:none; border-radius:50%;
+  border:2.5px solid var(--borde); border-top-color:var(--acento);
+  animation:girar .8s linear infinite;
+}
+@keyframes girar{ to{ transform:rotate(360deg); } }
+
+.avisos{
+  position:fixed; right:16px; bottom:40px; z-index:95;
+  display:flex; flex-direction:column; gap:8px; align-items:flex-end;
+}
+.aviso{
+  display:flex; align-items:center; gap:8px;
+  background:var(--fondo-2); color:var(--texto);
+  border:1px solid var(--borde); border-left:4px solid var(--azul);
+  border-radius:var(--radio-s); padding:10px 14px;
+  box-shadow:var(--sombra-fuerte); font-size:13.5px; max-width:400px;
+  animation:entrar .18s ease-out;
+}
+.aviso.bien{ border-left-color:var(--verde); }
+.aviso.mal{ border-left-color:var(--rojo); }
+@keyframes entrar{ from{ opacity:0; transform:translateY(6px); } }
+
+/* ---------- pie ---------- */
+.pie{
+  flex:none; padding:5px 14px;
+  font-size:11.5px; color:var(--texto-3);
+  background:var(--fondo-2); border-top:1px solid var(--borde-suave);
+  text-align:center;
+}
+.pie a{ color:var(--texto-2); }
+
+@media (max-width:900px){
+  .lateral{ display:none; }
+  .doc-info{ display:none; }
+  .zoom{ display:none; }
+}
