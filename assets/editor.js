@@ -903,6 +903,49 @@ function medirRenglon(pagina, caja) {
   if (papelLum - masOscuro < 25) return null;          // ahí no hay texto que medir
   const umbral = (papelLum + masOscuro) / 2;
 
+  /* Las RAYAS del cuadro no son tinta de letra, y si se cuentan como tal
+     estropean las dos cosas que más se notan:
+
+       · la altura. El recuadro de un renglón dentro de una celda suele
+         llevarse por delante la raya de arriba o la de abajo, y entonces
+         «lo que ocupa la tinta» va de la raya a la letra. Ahí es donde
+         salía un renglón corregido al doble de tamaño.
+       · el parche. Al extenderlo hasta encontrar papel limpio, una raya
+         cuenta como sucia, así que el parche se la traga y al taparla
+         desaparece el borde de la celda.
+
+     Una raya se reconoce en que cruza la caja de lado a lado: ninguna
+     letra llena más de la mitad del ancho en una sola fila. */
+  const oscuraEnFila = new Int32Array(al);
+  for (let y = 0; y < al; y++) {
+    let n = 0;
+    for (let x = 0; x < an; x++) if (lum[y * an + x] < umbral) n++;
+    oscuraEnFila[y] = n;
+  }
+  const esRaya = (y) => oscuraEnFila[y] > an * 0.6;
+  // una mota suelta no es un renglón: para contar como fila con tinta hace
+  // falta algo más que dos o tres píxeles perdidos
+  const hayTinta = (y) => !esRaya(y) && oscuraEnFila[y] >= Math.max(2, an * 0.015);
+
+  /* Lo que ocupa de verdad el renglón.
+     No vale quedarse con el píxel más alto y el más bajo: el recuadro que
+     da el reconocimiento suele pasarse, y por abajo alcanza las cabezas de
+     la fila siguiente. Tomando esos dos extremos, un renglón de siete
+     puntos se medía de diecisiete, y al corregirlo salía al doble de
+     tamaño. Lo que hay que buscar es la BANDA con tinta: se parten las
+     filas en bandas —dos filas en blanco seguidas las separan— y se elige
+     la que más tinta tiene, que es el renglón. */
+  const bandas = [];
+  for (let y = dentroY0; y <= dentroY1 && y < al; y++) {
+    if (!hayTinta(y)) continue;
+    const ultima = bandas[bandas.length - 1];
+    if (ultima && y - ultima.b <= 3) { ultima.b = y; ultima.tinta += oscuraEnFila[y]; }
+    else bandas.push({ a: y, b: y, tinta: oscuraEnFila[y] });
+  }
+  if (!bandas.length) return null;
+  const banda = bandas.reduce((m, x) => (x.tinta > m.tinta ? x : m), bandas[0]);
+
+
   // el papel, tomado de lo claro
   const claros = [];
   for (let i = 0; i < lum.length; i++) if (lum[i] >= papelLum - 6) claros.push(i);
@@ -914,28 +957,62 @@ function medirRenglon(pagina, caja) {
 
   // la tinta, tomada del CORAZÓN del trazo
   const tintaIdx = [];
-  for (let i = 0; i < lum.length; i++) if (dentro(i) && lum[i] < umbral) tintaIdx.push(i);
+  for (let i = 0; i < lum.length; i++) {
+    if (lum[i] >= umbral) continue;
+    const y = (i / an) | 0;
+    if (y < banda.a || y > banda.b) continue;
+    tintaIdx.push(i);
+  }
   if (tintaIdx.length < 12) return null;
   tintaIdx.sort((a, b) => lum[a] - lum[b]);
   const nucleo = tintaIdx.slice(0, Math.max(4, Math.round(tintaIdx.length * 0.25)));
 
-  // lo que ocupa de verdad, y el grosor del trazo
-  let arriba = al, abajo = -1, izq = an, der = -1;
+  /* Dónde empieza y dónde acaba la tinta.
+
+     El recuadro de una celda suele empezar justo en su borde, y el borde
+     entra en el recorte: contándolo como tinta, el renglón corregido se
+     escribe pegado al borde en vez de donde estaba el texto. Así que se
+     agrupan las columnas con tinta y se descartan los grupos de los
+     extremos que son FINOS y están LEJOS del resto: eso es una raya, no
+     una letra. */
+  const altoBanda = banda.b - banda.a + 1;
+  const tintaCol = new Int32Array(an);
+  for (let y = banda.a; y <= banda.b; y++) {
+    for (let x = 0; x < an; x++) if (lum[y * an + x] < umbral) tintaCol[x]++;
+  }
+  const grupos = [];
+  for (let x = 0; x < an; x++) {
+    if (!tintaCol[x]) continue;
+    const u = grupos[grupos.length - 1];
+    if (u && x - u.b <= 2) u.b = x;
+    else grupos.push({ a: x, b: x });
+  }
+  if (!grupos.length) return null;
+  const lejos = Math.max(4, altoBanda * 0.5);
+  const fino = Math.max(2, altoBanda * 0.25);
+  while (grupos.length > 1) {
+    const g = grupos[0];
+    if (g.b - g.a + 1 <= fino && grupos[1].a - g.b > lejos) grupos.shift();
+    else break;
+  }
+  while (grupos.length > 1) {
+    const g = grupos[grupos.length - 1];
+    if (g.b - g.a + 1 <= fino && g.a - grupos[grupos.length - 2].b > lejos) grupos.pop();
+    else break;
+  }
+  const izq = grupos[0].a, der = grupos[grupos.length - 1].b;
+
   const rachas = [];
-  for (let y = dentroY0; y <= dentroY1 && y < al; y++) {
+  for (let y = banda.a; y <= banda.b; y++) {
     let racha = 0;
-    for (let x = 0; x < an; x++) {
-      if (lum[y * an + x] < umbral) {
-        racha++;
-        if (y < arriba) arriba = y;
-        if (y > abajo) abajo = y;
-        if (x < izq) izq = x;
-        if (x > der) der = x;
-      } else if (racha) { rachas.push(racha); racha = 0; }
+    for (let x = izq; x <= der; x++) {
+      if (lum[y * an + x] < umbral) racha++;
+      else if (racha) { rachas.push(racha); racha = 0; }
     }
     if (racha) rachas.push(racha);
   }
-  if (abajo < arriba) return null;
+  const arriba = banda.a, abajo = banda.b;
+  if (der < izq) return null;
   rachas.sort((a, b) => a - b);
   const grosor = rachas[Math.floor(rachas.length / 2)] || 1;
 
@@ -945,7 +1022,7 @@ function medirRenglon(pagina, caja) {
   let medios = 0, bordes = 0;
   const bajo = masOscuro + (papelLum - masOscuro) * 0.25;
   const alto2 = masOscuro + (papelLum - masOscuro) * 0.75;
-  for (let y = dentroY0; y <= dentroY1 && y < al; y++) {
+  for (let y = arriba; y <= abajo; y++) {
     let previo = null;
     for (let x = 0; x < an; x++) {
       const v = lum[y * an + x];
@@ -962,26 +1039,32 @@ function medirRenglon(pagina, caja) {
   // repiten para cubrir el renglón. Así el trozo tapado lleva el mismo grano
   // y el mismo tono que el papel de al lado, en vez de un rectángulo liso
   // que se adivina a la primera.
+  // Papel limpio de verdad: no basta con que no sea un renglón, porque las
+  // filas de justo encima y de justo debajo llevan el borde difuminado de
+  // las letras, y copiarlas deja el parche con rayas verticales donde
+  // estaban. Se pide que estén casi vacías.
   const limpias = [];
   for (let y = 0; y < al; y++) {
-    if (y >= dentroY0 && y <= dentroY1) continue;
-    let sucia = false;
-    for (let x = 0; x < an; x++) if (lum[y * an + x] < umbral) { sucia = true; break; }
-    if (!sucia) limpias.push(y);
+    if (y >= banda.a && y <= banda.b) continue;
+    if (esRaya(y)) continue;
+    if (oscuraEnFila[y] > Math.max(1, an * 0.005)) continue;
+    limpias.push(y);
   }
   // El parche se estira hasta la primera fila de papel limpio por arriba y
   // por abajo: si se queda en el recuadro del reconocimiento, los rabillos
   // que sobresalen —tildes, palos altos— se quedan fuera y aparecen motas
   // encima del renglón corregido. Parar en la fila limpia evita además
   // comerse el renglón de al lado.
-  const filaSucia = (y) => {
-    for (let x = 0; x < an; x++) if (lum[y * an + x] < umbral) return true;
-    return false;
-  };
-  let pArriba = Math.max(0, Math.min(dentroY0, arriba));
-  while (pArriba > 0 && filaSucia(pArriba - 1)) pArriba--;
-  let pAbajo = Math.min(al - 1, Math.max(dentroY1, abajo));
-  while (pAbajo < al - 1 && filaSucia(pAbajo + 1)) pAbajo++;
+  // una raya no cuenta como sucia: el parche tiene que pararse ANTES de
+  // ella, o al taparla se lleva por delante el borde de la celda
+  // El parche se estira hasta la primera fila de papel limpio, para no
+  // dejar fuera los rabillos que sobresalen —tildes, palos altos—, pero
+  // parándose en la raya del cuadro y en el renglón de al lado: taparlos
+  // sería borrar el borde de la celda o comerse la fila siguiente.
+  let pArriba = arriba;
+  while (pArriba > 0 && hayTinta(pArriba - 1)) pArriba--;
+  let pAbajo = abajo;
+  while (pAbajo < al - 1 && hayTinta(pAbajo + 1)) pAbajo++;
 
   let parche = null;
   if (limpias.length >= 2) {
@@ -990,18 +1073,33 @@ function medirRenglon(pagina, caja) {
     // Cada fila del parche se mezcla entre la fila limpia más cercana por
     // arriba y la más cercana por abajo, según lo lejos que esté de cada una.
     // Copiar siempre la misma fila deja una costura horizontal muy visible.
-    const arribaLimpia = limpias.filter((y) => y < pArriba);
-    const abajoLimpia = limpias.filter((y) => y > pAbajo);
-    const fA = arribaLimpia.length ? arribaLimpia[arribaLimpia.length - 1] : (abajoLimpia[0] || 0);
-    const fB = abajoLimpia.length ? abajoLimpia[0] : fA;
+    // De cada lado se toma la MEDIANA de varias filas limpias, no una sola:
+    // una mota o el rastro de una letra en la fila elegida se convertiría
+    // en una raya vertical a lo largo de todo el parche.
+    const arribaLimpia = limpias.filter((y) => y < pArriba).slice(-7);
+    const abajoLimpia = limpias.filter((y) => y > pAbajo).slice(0, 7);
+    const ladoA = arribaLimpia.length ? arribaLimpia : abajoLimpia;
+    const ladoB = abajoLimpia.length ? abajoLimpia : ladoA;
+    const medianaDe = (filas2, x, canal) => {
+      const v2 = filas2.map((y) => rgb[(y * an + x) * 3 + canal]).sort((p, q) => p - q);
+      return v2.length ? v2[v2.length >> 1] : 255;
+    };
+    const colA = [0, 1, 2].map((c) => new Uint8Array(an));
+    const colB = [0, 1, 2].map((c) => new Uint8Array(an));
+    for (let x = 0; x < an; x++) {
+      for (let c = 0; c < 3; c++) {
+        colA[c][x] = medianaDe(ladoA, x, c);
+        colB[c][x] = medianaDe(ladoB, x, c);
+      }
+    }
+    const yA = ladoA.length ? ladoA[ladoA.length - 1] : pArriba;
+    const yB = ladoB.length ? ladoB[0] : pAbajo;
     for (let y = 0; y < alturaParche; y++) {
-      const t = fB === fA ? 0 : (y + pArriba - fA) / (fB - fA);
+      const t = yB === yA ? 0 : (y + pArriba - yA) / (yB - yA);
       const w = Math.max(0, Math.min(1, t));
       for (let x = 0; x < an; x++) {
-        const d = (y * an + x) * 3, a3 = (fA * an + x) * 3, b3 = (fB * an + x) * 3;
-        datos[d] = rgb[a3] * (1 - w) + rgb[b3] * w;
-        datos[d + 1] = rgb[a3 + 1] * (1 - w) + rgb[b3 + 1] * w;
-        datos[d + 2] = rgb[a3 + 2] * (1 - w) + rgb[b3 + 2] * w;
+        const d = (y * an + x) * 3;
+        for (let c = 0; c < 3; c++) datos[d + c] = colA[c][x] * (1 - w) + colB[c][x] * w;
       }
     }
     parche = {
@@ -1108,6 +1206,12 @@ function limpiarParaLeer(lienzo) {
   const borrar = new Uint8Array(an * al);
   const largoH = Math.max(40, Math.round(an * 0.10));
   const largoV = Math.max(30, Math.round(al * 0.020));
+  // Para BORRAR una raya vertical basta con que sea larga; para tomarla por
+  // BORDE DE CELDA hay que pedirle mucho más, porque el palo de una letra
+  // grande llega a los cuarenta y pico píxeles y, si se cuela, parte la
+  // celda por la mitad y ya no se puede corregir de una vez. Un borde de
+  // verdad cruza la fila entera y sigue.
+  const largoColumna = Math.max(70, Math.round(al * 0.025));
   const barrer = (cuantos, cada, esOscuro, marcar, largo) => {
     for (let i = 0; i < cuantos; i++) {
       let ini = -1, vacio = 0;
@@ -1126,8 +1230,35 @@ function limpiarParaLeer(lienzo) {
   };
   const porFila = new Int32Array(al);
   barrer(al, an, (y, x) => oscuro(x, y), (y, x) => { borrar[y * an + x] = 1; porFila[y]++; }, largoH);
+  barrer(an, al, (x, y) => oscuro(x, y), (x, y) => { borrar[y * an + x] = 1; }, largoV);
+
+  /* Los BORDES de celda se buscan aparte y con otra vara de medir.
+     Escaneado, un borde no es una tirada limpia: llega a trozos, con
+     huecos. Y el palo de una letra grande da una tirada de cuarenta y
+     pico píxeles, que si se toma por borde parte la celda por la mitad y
+     ya no se puede corregir de una vez.
+     Lo que distingue a un borde es que abarca un tramo LARGO y que dentro
+     de ese tramo está casi siempre: una columna de letras alineadas
+     abarca mucho pero está medio vacía. */
   const porColumna = new Int32Array(an);
-  barrer(an, al, (x, y) => oscuro(x, y), (x, y) => { borrar[y * an + x] = 1; porColumna[x]++; }, largoV);
+  const HUECO_BORDE = 14;
+  for (let x = 0; x < an; x++) {
+    let ini = -1, ultimo = -1, dentro = 0, mejor = 0;
+    for (let y = 0; y <= al; y++) {
+      if (y < al && oscuro(x, y)) {
+        if (ini < 0) { ini = y; dentro = 0; }
+        ultimo = y; dentro++;
+        continue;
+      }
+      if (ini < 0) continue;
+      if (y === al || y - ultimo > HUECO_BORDE) {
+        const largo = ultimo - ini + 1;
+        if (largo > mejor && dentro >= largo * 0.6) mejor = largo;
+        ini = -1; dentro = 0;
+      }
+    }
+    porColumna[x] = mejor;
+  }
 
   // Dónde están las rayas VERTICALES: son los bordes de las celdas, y saber
   // dónde caen permite después partir cada fila del cuadro en celdas.
@@ -1140,14 +1271,17 @@ function limpiarParaLeer(lienzo) {
     const v = (i) => (i >= 0 && i < total ? cuenta[i] : 0);
     for (let i = 0; i < total; i++) {
       if (cuenta[i] < minimo) continue;
-      // una raya es FINA: un logo o una firma también dan tiradas largas
-      if (v(i - vecinos) > minimo * 0.4 || v(i + vecinos) > minimo * 0.4) continue;
+      // Una raya es FINA: un logo o una firma también dan tiradas largas.
+      // Se compara con lo que mide ELLA, no con el mínimo: al lado de una
+      // raya larga puede haber una mancha corta —una banda de color, un
+      // sello— y eso no la convierte en mancha.
+      if (v(i - vecinos) > cuenta[i] * 0.5 || v(i + vecinos) > cuenta[i] * 0.5) continue;
       if (salida.length && i - salida[salida.length - 1] <= vecinos) continue;
       salida.push(i);
     }
     return salida;
   };
-  const columnas = juntar(porColumna, an, largoV, 6);
+  const columnas = juntar(porColumna, an, largoColumna, 6);
   const filas = juntar(porFila, al, largoH, 6);
   for (let y = 0; y < al; y++) {
     const cy = (y / B) | 0;
@@ -2640,10 +2774,12 @@ $('#btnRecuperar').addEventListener('click', () => {
   }, 20);
 });
 
-$('#btnDescartar').addEventListener('click', () => {
+$('#btnDescartar').addEventListener('click', async () => {
   $('#recuperar').hidden = true;
   guardadoEnEspera = null;
-  olvidarTrabajo();
+  // se espera a que esté borrado de verdad antes de decir que lo está:
+  // recargando en ese medio segundo, volvía a aparecer
+  await olvidarTrabajo();
   avisar('Borrado lo que había guardado.');
 });
 

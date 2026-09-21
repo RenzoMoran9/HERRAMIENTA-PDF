@@ -78,6 +78,7 @@ await arrancar();
 ok('vuelve a ofrecerlo', await pag.isVisible('#recuperar'));
 await pag.click('#btnDescartar');
 ok('al descartar se quita la banda', await pag.isHidden('#recuperar'));
+await pag.waitForFunction(() => /Borrado lo que había guardado/.test(document.querySelector('#avisos').textContent), null, { timeout: 15000 });
 await arrancar();
 ok('y ya no vuelve a ofrecerlo', await pag.isHidden('#recuperar'));
 

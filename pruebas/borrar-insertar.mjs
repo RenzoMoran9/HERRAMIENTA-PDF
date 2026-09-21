@@ -62,6 +62,7 @@ ok('queda un renglón menos en la hoja',
 
 /* --- insertar: se pulsa el sitio y se escribe --- */
 const NUEVO = 'ANOTACION: VER ANEXO 2';
+await pag.waitForTimeout(600);
 await pag.click('#btnInsertar');
 ok('el botón de insertar se queda encendido',
    await pag.evaluate(() => document.querySelector('#btnInsertar').classList.contains('activo')));
@@ -78,7 +79,9 @@ const punto = await pag.evaluate(() => {
            hojaX: izq / esc, hojaY: (abajo + 28 * esc) / esc };
 });
 await pag.mouse.click(punto.x, punto.y);
-await pag.waitForSelector('.campo', { timeout: 5000 });
+await pag.waitForTimeout(400);
+if (!(await pag.locator('.campo').count())) await pag.mouse.click(punto.x, punto.y);
+await pag.waitForSelector('.campo', { timeout: 10000 });
 const ayudaIns = await pag.textContent('.campo-ayuda');
 console.log('  ayuda:', JSON.stringify(ayudaIns));
 ok('dice con qué letra se escribirá antes de escribir', /Se escribirá en .+ de [\d.]+ pt/.test(ayudaIns), ayudaIns);

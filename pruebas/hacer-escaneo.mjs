@@ -1,6 +1,6 @@
 /* Un "escaneo": la hoja pintada como imagen y metida en un PDF, que es
    exactamente lo que sale de un escáner. Sin datos de nadie. */
-import * as mupdf from '/tmp/claude-0/-home-user-PRUEBAS/c817bb0b-706b-5ee2-a31a-ebc8dc4c33ff/scratchpad/grapa-editor/lib/mupdf.js';
+import * as mupdf from '../lib/mupdf.js';
 import { chromium } from '/opt/node22/lib/node_modules/playwright/index.mjs';
 import fs from 'node:fs';
 const doc = mupdf.PDFDocument.openDocument(new Uint8Array(fs.readFileSync(process.argv[2])), 'application/pdf');

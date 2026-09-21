@@ -155,6 +155,44 @@ const solapa = (a, b) => {
 };
 
 /**
+ * Junta los trozos que en el papel son UN renglón.
+ *
+ * Quitadas las rayas del cuadro, cada celda queda como una isla y el
+ * reconocedor la parte en palabras o en pedazos. Volver a juntarlos por las
+ * rayas no basta: el palo de una letra grande se toma a veces por raya y
+ * parte la celda por la mitad.
+ *
+ * Lo que sí distingue una cosa de otra es el HUECO. Dentro de una celda, de
+ * una palabra a la siguiente hay un espacio: una fracción de lo que mide la
+ * letra. Entre una celda y la de al lado hay el borde y su margen, que es
+ * bastante más que la letra. Así que se juntan los trozos de la misma banda
+ * cuyo hueco no llegue a ocho décimas de su altura, y se dejan en paz los
+ * demás.
+ */
+const HUECO_CELDA = 0.8;
+
+function juntarPorHueco(lista) {
+  const orden = lista.slice().sort((a, b) => (a.y0 - b.y0) || (a.x0 - b.x0));
+  const salida = [];
+  for (const r of orden) {
+    const alto = r.y1 - r.y0;
+    const previo = salida.find((p) => {
+      // misma banda: se solapan a lo alto más de la mitad
+      const solape = Math.min(p.y1, r.y1) - Math.max(p.y0, r.y0);
+      if (solape < Math.min(p.y1 - p.y0, alto) * 0.5) return false;
+      const hueco = r.x0 - p.x1;
+      return hueco >= -2 && hueco < Math.max(alto, p.y1 - p.y0) * HUECO_CELDA;
+    });
+    if (!previo) { salida.push(Object.assign({}, r)); continue; }
+    previo.texto = sinBarras(previo.texto + ' ' + r.texto);
+    previo.conf = (previo.conf + r.conf) / 2;
+    previo.x0 = Math.min(previo.x0, r.x0); previo.y0 = Math.min(previo.y0, r.y0);
+    previo.x1 = Math.max(previo.x1, r.x1); previo.y1 = Math.max(previo.y1, r.y1);
+  }
+  return salida;
+}
+
+/**
  * Se lee dos veces. La primera, en automático, que es la buena para los
  * párrafos. La segunda, en modo disperso, que es la que ve el texto suelto
  * dentro de las celdas de un cuadro: en automático las celdas se funden
@@ -226,7 +264,7 @@ export async function reconocer(imagen, cuadricula, alProgresar) {
       x1: Math.max(...lista.map((r) => r.x1)), y1: Math.max(...lista.map((r) => r.y1)),
     };
   });
-  const finales = sueltos.concat(juntados);
+  const finales = juntarPorHueco(sueltos.concat(juntados));
   renglones.length = 0;
   renglones.push(...finales);
   renglones.sort((a, b) => (a.y0 - b.y0) || (a.x0 - b.x0));

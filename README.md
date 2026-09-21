@@ -194,6 +194,26 @@ propia imagen:
 | El **grosor del trazo** respecto a la altura | Dice si era negrita mucho mejor que la cantidad de tinta. |
 | Lo **blando** que es el borde | Un escaneo tiene el borde difuso; el texto vectorial lo tiene limpio, y esa es la diferencia que más canta. El renglón se compone como imagen con ese mismo desenfoque, y como desenfocar aclara la tinta, se mide lo que sale y se vuelve a componer hasta que el negro coincide. |
 
+**Dentro de un cuadro** hay dos cosas más que cuidar, y son las que se
+llevaban por delante una cotización con su tabla de precios:
+
+- El recuadro que da el reconocimiento a una celda **se pasa**: por abajo
+  alcanza la raya del cuadro y las cabezas del renglón siguiente. Midiendo «de
+  lo más alto a lo más bajo», un renglón de seis puntos se medía de dieciséis
+  y el corregido salía **al doble de tamaño**. Ahora se busca la *banda* con
+  tinta —las filas se parten en bandas y se elige la que más tinta tiene— y esa
+  es el renglón.
+- El parche se estiraba hasta encontrar papel limpio y **se tragaba la raya**,
+  así que al taparla desaparecía el borde de la celda. Ahora una raya no cuenta
+  como suciedad: el parche se para antes.
+- El papel del parche se copiaba de una sola fila, y si esa fila llevaba el
+  borde difuminado de las letras quedaban **rayas verticales** donde estaba el
+  texto viejo. Ahora se toma la mediana de varias filas limpias.
+- Y el borde de la celda, que entra en el recorte, se contaba como tinta: el
+  texto nuevo salía **pegado al borde** en vez de donde estaba. Ahora los
+  grupos de tinta finos y alejados del resto —eso es una raya, no una letra— se
+  descartan.
+
 Medido sobre una cotización escaneada de verdad, comparando el renglón
 corregido con el original:
 
@@ -212,8 +232,14 @@ dentro de la propia hoja. La foto original nunca se modifica: lo que tapa es un
 recuadro nuestro. Y como el modelo viaja en el archivo, la hoja se puede seguir
 corrigiendo después de guardarla, cerrarla o pasarla por Grapa.
 
-El reconocimiento se equivoca a veces —confunde `I` con `l`, sobre todo—, así
-que conviene mirarlo antes de fiarse. El editor dice con qué confianza leyó.
+Los trozos que el reconocimiento parte se vuelven a juntar **por el hueco**:
+dentro de una celda, de una palabra a la siguiente hay un espacio pequeño; de
+una celda a la de al lado hay el borde y su margen, que es bastante más. Así
+una celda entera se corrige de una vez, en lugar de palabra por palabra.
+
+El reconocimiento se equivoca a veces —confunde `I` con `l`, `S/` con `si`—, así
+que conviene mirarlo antes de fiarse. El editor dice con qué confianza leyó, y
+lo que importa es lo que escribas tú: lo leído solo es el punto de partida.
 
 ---
 
@@ -237,6 +263,10 @@ node pruebas/buscar.mjs       # buscar en las cinco hojas y reemplazar de una
 node pruebas/borrar-insertar.mjs   # borrar un renglón y escribir donde no
                               # había nada, en hoja de texto y en escaneo:
                               # en el escaneo se mide la propia foto
+node pruebas/hacer-cuadro.mjs # rehace la cotización escaneada con cuadro
+node pruebas/cuadro.mjs       # corregir un precio dentro de una celda: que
+                              # salga del tamaño de la letra y que no se coma
+                              # el borde del cuadro
 node pruebas/hacer-solicitud.mjs # rehace el correo de Gmail de prueba
 node pruebas/tipografia.mjs   # que el renglón corregido conserve la letra
                               # del documento y lo que llevara dentro
