@@ -29,6 +29,75 @@ También sirve suelto: arrastra un PDF encima y listo.
 
 Cada cambio queda anotado en la columna de la izquierda, y `Ctrl+Z` deshace.
 
+### Borrar un renglón
+
+Pulsa el renglón, **déjalo vacío** y `Enter`. No se tapa con blanco: en una hoja
+de texto se quita del archivo, y en una escaneada se cubre con el papel de las
+filas de al lado, como al corregir.
+
+### Escribir donde no hay nada
+
+**Insertar** (`Ctrl+I`) y después pulsa el sitio. Se escribe con la
+**tipografía, el tamaño y el color del renglón más cercano** de esa hoja —te lo
+dice antes de escribir— para que no cante al lado de lo que ya estaba. Donde
+pulsas es la línea base, y el texto queda ahí con menos de 2 pt de desvío.
+
+En una hoja escaneada sin reconocer no hay dónde insertar: primero **Reconocer
+el texto**, o usa **Sello y marcas** en Grapa, que escribe encima sin tocar el
+escaneo.
+
+### Hojas giradas
+
+Una hoja girada no es una hoja puesta de lado: es una hoja que por dentro está
+de lado y lleva la orden de enderezarse al mostrarse. Es lo que sale de meter
+el papel torcido en el escáner, y por eso llega tan a menudo. Antes el editor
+avisaba y no tocaba nada; ahora escribe en ella igual que en cualquier otra,
+con los giros de 90, 180 y 270°.
+
+### PDF firmados digitalmente
+
+Si el PDF lleva una firma digital puesta, se dice nada más abrirlo: **cualquier
+cambio la invalida** y el documento deja de estar firmado. No se impide editarlo
+—a veces se corrige a sabiendas, para volver a firmar— pero no se hace a ciegas.
+Un hueco de firma sin firmar no cuenta como firma y no avisa.
+
+### No se pierde el trabajo
+
+Tras cada cambio, el documento y su lista de cambios quedan guardados **en el
+navegador de este equipo**. Si se cierra la pestaña sin querer, al volver a
+abrir el editor te ofrece **recuperar** lo que llevabas, diciéndote qué era y
+de cuándo. Funciona igual desde la web que desde el archivo suelto.
+
+Se guarda aquí y en ningún otro sitio —no hay servidor al que mandarlo—, pero
+queda en el equipo hasta que se descarte. Por eso está a la vista y se puede
+apagar: **Guardar mi trabajo en este equipo**, abajo en la columna izquierda.
+Apagarlo borra en el acto lo que hubiera guardado, que en un ordenador
+compartido no es cosa menor.
+
+Y si intentas cerrar con cambios que no has descargado ni devuelto a Grapa, el
+navegador pregunta antes.
+
+### Buscar y reemplazar
+
+`Ctrl+F` lleva a la caja de búsqueda. Se busca en **todas las hojas** a la vez
+—también en las escaneadas que ya se reconocieron— y los resultados salen en la
+columna de la izquierda con lo encontrado resaltado; al pulsar uno se abre su
+hoja y se marca el renglón. `Enter` repetido va saltando de uno a otro.
+
+Escribiendo también el texto nuevo, **Todas** los cambia de una vez. Es el caso
+para el que se hizo: un número de expediente o una fecha mal puestos que se
+repiten en doce hojas.
+
+Dos cosas que conviene saber:
+
+- Los cinco, doce o veinte cambios dejan **un solo paso que deshacer**, no
+  veinte: un `Ctrl+Z` los quita todos.
+- Un renglón que **mezcla tipografías o tamaños** no lo toca «Todas», porque
+  reescribirlo entero con la tipografía de su primera letra estropearía el
+  renglón. Queda marcado en la lista para cambiarlo a mano, que es donde sale
+  el aviso. Lo mismo con los que fallen por cualquier otro motivo: se dice
+  cuántos y por qué.
+
 ---
 
 ## Lo que hace y lo que todavía no
@@ -47,7 +116,6 @@ Cada cambio queda anotado en la columna de la izquierda, y `Ctrl+Z` deshace.
 
 **Lo que todavía no**
 
-- Hojas giradas (`/Rotate` distinto de cero): te avisa y no toca nada.
 - Renglones que mezclan varias tipografías o tamaños: deja escribir, pero
   advierte antes, porque el renglón se reescribe con la tipografía de su
   primera letra.
@@ -56,7 +124,6 @@ Cada cambio queda anotado en la columna de la izquierda, y `Ctrl+Z` deshace.
   primera corrección. Dentro de la misma sesión, `Ctrl+Z`.
 - **Reproducir una tipografía manuscrita o poco corriente** al corregir un
   escaneo: se escribe con la equivalente estándar, normal o negrita.
-- Borrar un renglón entero.
 - La tipografía que se escribe es la equivalente estándar (las catorce que
   todo lector de PDF trae de serie), no la copia incrustada del original.
   Se elige respetando **negrita, cursiva, gracias y monoespaciado**, y
@@ -130,6 +197,21 @@ node pruebas/escaneo.mjs      # una hoja escaneada: que se explique, no que
 node pruebas/reconocer.mjs    # reconocer un escaneo: texto buscable donde no
                               # había nada, y la foto intacta píxel a píxel
 node pruebas/suelto-ocr.mjs   # lo mismo desde el disco, con el navegador sin red
+node pruebas/buscar.mjs       # buscar en las cinco hojas y reemplazar de una
+                              # vez: que cambien todas, que no se pierda ningún
+                              # renglón y que un Ctrl+Z lo deshaga entero
+node pruebas/borrar-insertar.mjs   # borrar un renglón y escribir donde no
+                              # había nada, en hoja de texto y en escaneo:
+                              # en el escaneo se mide la propia foto
+node pruebas/hacer-firmado.mjs # rehace el PDF con firma digital
+node pruebas/firmado.mjs      # que avise de la firma antes de tocar nada
+node pruebas/hacer-girado.mjs # rehace los archivos de hojas giradas
+node pruebas/girado.mjs       # corregir, borrar e insertar en hojas con
+                              # /Rotate 90, 180 y 270, y en un escaneo girado
+node pruebas/guardado.mjs     # guardar el trabajo y recuperarlo al volver,
+                              # por la web y desde el archivo suelto
+node pruebas/pasos.mjs        # los botones «−» y «+» del tamaño
+node pruebas/todas.mjs        # todas, una detrás de otra
 node pruebas/corregir-escaneo.mjs   # corregir un renglón de una foto: comprueba
                                     # que la FOTO también cambia, volviéndola a
                                     # leer con el propio OCR

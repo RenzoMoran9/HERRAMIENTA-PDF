@@ -25,6 +25,7 @@
   <g id="i-lupa-texto"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.4-4.4"/><path d="M8 8.5h5"/><path d="M8 12h5"/></g>
   <g id="i-escaneo"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="8.5" cy="9.5" r="1.8"/><path d="m4 17 4.5-4.5 3.5 3.5 3-3L20 17"/></g>
   <g id="i-texto"><path d="M5 6.5V5h14v1.5"/><path d="M12 5v14"/><path d="M9 19h6"/></g>
+  <g id="i-insertar"><path d="M4 6.5V5h11v1.5"/><path d="M9.5 5v14"/><path d="M6.5 19h6"/><path d="M18.5 12.5v7"/><path d="M15 16h7"/></g>
   <g id="i-deshacer"><path d="M9 14 4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></g>
   <g id="i-tema"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18Z" fill="currentColor" stroke="none"/></g>
   <g id="i-cerrar"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></g>
@@ -51,6 +52,7 @@
     </div>
     <label class="zoom">Tamaño <input type="range" id="zoom" min="50" max="300" value="120"></label>
     <button class="btn" id="btnAbrir"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-abrir"/></svg> Abrir</button>
+    <button class="btn" id="btnInsertar" disabled title="Escribir texto nuevo donde pulses (Ctrl+I)"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-insertar"/></svg> Insertar</button>
     <button class="btn" id="btnDeshacer" disabled><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-deshacer"/></svg> Deshacer</button>
     <button class="btn btn-primario" id="btnDevolver" hidden><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-volver"/></svg> Devolver a Grapa</button>
     <button class="btn" id="btnDescargar" disabled><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-guardar"/></svg> Descargar</button>
@@ -58,11 +60,56 @@
   </div>
 </header>
 
+<!-- Editar un PDF firmado digitalmente invalida la firma, y sin avisar
+     nadie se entera hasta que el documento rebota. -->
+<div class="aviso-firma" id="avisoFirma" hidden>
+  <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-aviso"/></svg>
+  <div class="recuperar-texto">
+    <strong id="avisoFirmaTitulo">Este PDF lleva firma digital</strong>
+    <span>Cualquier cambio la invalida: el documento dejará de estar firmado.
+      Si la necesitas, guarda una copia antes de tocar nada.</span>
+  </div>
+  <button class="btn" id="btnEntendidoFirma">Entendido</button>
+</div>
+
+<!-- Se ofrece solo cuando no hay nada abierto: si el documento ya llegó
+     —de Grapa o de un archivo— estorbaría más que ayudar. -->
+<div class="recuperar" id="recuperar" hidden>
+  <div class="recuperar-texto">
+    <strong>Tenías trabajo a medias</strong>
+    <span id="recuperarDetalle"></span>
+  </div>
+  <button class="btn btn-primario" id="btnRecuperar">Recuperar</button>
+  <button class="btn" id="btnDescartar">Descartar</button>
+</div>
+
 <main class="cuerpo">
   <aside class="lateral" id="lateral">
-    <h2 class="lateral-titulo">Cambios</h2>
-    <p class="pista" id="pistaCambios">Haz clic sobre cualquier renglón de la hoja para corregir su texto.</p>
+    <div class="buscador" id="buscador">
+      <h2 class="lateral-titulo">Buscar y reemplazar</h2>
+      <div class="buscar-fila">
+        <input type="search" id="buscarTexto" placeholder="Buscar en todo el documento" autocomplete="off">
+        <button class="btn btn-mini" id="btnBuscar" title="Buscar (Ctrl+F)">Buscar</button>
+      </div>
+      <div class="buscar-fila">
+        <input type="text" id="reemplazarTexto" placeholder="Reemplazar por…" autocomplete="off">
+        <button class="btn btn-mini" id="btnReemplazarTodo" title="Cambiar todas las coincidencias de una vez">Todas</button>
+      </div>
+      <label class="check"><input type="checkbox" id="buscarMayus"> Distinguir mayúsculas</label>
+      <p class="pista" id="buscarResumen" hidden></p>
+      <ol class="resultados" id="resultados"></ol>
+    </div>
+
+    <h2 class="lateral-titulo lateral-titulo-2">Cambios</h2>
+    <p class="pista" id="pistaCambios">Haz clic sobre cualquier renglón de la hoja para corregir su texto.
+      Para <b>borrarlo</b>, déjalo vacío y pulsa Enter. Para <b>escribir donde no hay
+      nada</b>, pulsa <b>Insertar</b> y luego el sitio.</p>
     <ol class="cambios" id="cambios"></ol>
+
+    <div class="guardado" id="guardado">
+      <label class="check"><input type="checkbox" id="guardarAqui" checked> Guardar mi trabajo en este equipo</label>
+      <p class="pista" id="guardadoEstado"></p>
+    </div>
 
     <div class="reconocido" id="reconocido" hidden>
       <h2 class="lateral-titulo">Texto reconocido</h2>
