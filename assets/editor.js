@@ -157,6 +157,7 @@ function leerRenglones(pagina) {
           salida.push({
             texto,
             bbox: act.bbox,
+            letras: l,          // hace falta para cambiar solo el trozo que cambió
             x: l[0].x,
             y: l[0].y,
             fuente: l[0].fuente,
@@ -223,6 +224,299 @@ function resolverFuente(nombre, rasgos) {
   return { fuente: new Font('Helvetica'), nombre: 'Helvetica', sustituida: true };
 }
 
+/* ---------- escribir con la tipografía del propio documento ----------
+
+   Al reescribir un renglón se usaba una de las catorce tipografías que todo
+   lector trae de serie, la más parecida. En un documento corriente no se
+   nota; en uno con personalidad, sí, y es lo que hacía que lo corregido «se
+   sintiera distinto» aunque el tamaño, el color y el sitio fueran los
+   mismos.
+
+   Pero la tipografía buena ya está dentro del archivo, incrustada. Lo único
+   que falta es saber con qué número se pide cada letra, y eso lo dice el
+   /ToUnicode de la propia tipografía: la tabla que usa el lector para
+   copiar y pegar, que dice qué letra es cada número. Se le da la vuelta.
+
+   Dos cosas que hay que respetar:
+
+     · Un PDF incrusta solo las letras que USÓ. Si el texto nuevo trae una
+       que no está —una eñe en un documento que no tenía ninguna— no hay
+       nada que hacer con esa tipografía, y se vuelve a la de serie.
+     · Los anchos son los suyos, no los de Helvetica, y hay que leerlos de
+       su tabla (/W en las CID, /Widths en las sencillas) o el renglón sale
+       apretado o suelto.                                                  */
+
+/** Los recursos de una hoja pueden venir heredados del nodo de arriba. */
+function recursosDe(objPag) {
+  let n = objPag, hondo = 0;
+  while (n && n.isDictionary && n.isDictionary() && hondo++ < 16) {
+    const r = n.get('Resources');
+    if (r && r.isDictionary && r.isDictionary()) return r;
+    n = n.get('Parent');
+  }
+  return null;
+}
+
+/** El diccionario de tipografías donde escribir, creándolo si no lo hay.
+ *  Ojo: poner un Resources nuevo en la hoja TAPA el heredado y la dejaría
+ *  sin sus propias tipografías, así que primero se busca hacia arriba. */
+function fuentesDe(objPag) {
+  let rec = recursosDe(objPag);
+  if (!rec) { rec = doc.addObject(doc.newDictionary()); objPag.put('Resources', rec); }
+  let fuentes = rec.get('Font');
+  if (!fuentes || !fuentes.isDictionary()) {
+    fuentes = doc.addObject(doc.newDictionary());
+    rec.put('Font', fuentes);
+  }
+  return fuentes;
+}
+
+/** Le da la vuelta al /ToUnicode: de «qué letra es este número» a «qué
+ *  número pide esta letra». */
+function leerToUnicode(txt) {
+  const mapa = new Map();
+  const unaLetra = (h) => (h.length > 4 ? null : String.fromCharCode(parseInt(h, 16)));
+  let m;
+  const bfchar = /beginbfchar([\s\S]*?)endbfchar/g;
+  while ((m = bfchar.exec(txt))) {
+    const par = /<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>/g;
+    let q;
+    while ((q = par.exec(m[1]))) {
+      const c = unaLetra(q[2]);
+      if (c !== null && !mapa.has(c)) mapa.set(c, parseInt(q[1], 16));
+    }
+  }
+  const bfrange = /beginbfrange([\s\S]*?)endbfrange/g;
+  while ((m = bfrange.exec(txt))) {
+    const fila = /<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*(?:<([0-9A-Fa-f]+)>|\[([\s\S]*?)\])/g;
+    let q;
+    while ((q = fila.exec(m[1]))) {
+      const desde = parseInt(q[1], 16), hasta = parseInt(q[2], 16);
+      if (hasta < desde || hasta - desde > 65535) continue;
+      if (q[3] !== undefined) {
+        if (q[3].length > 4) continue;
+        const base = parseInt(q[3], 16);
+        for (let i = 0; i <= hasta - desde; i++) {
+          const c = String.fromCharCode(base + i);
+          if (!mapa.has(c)) mapa.set(c, desde + i);
+        }
+      } else {
+        const lista = q[4].match(/<[0-9A-Fa-f]+>/g) || [];
+        lista.forEach((h, i) => {
+          const c = unaLetra(h.slice(1, -1));
+          if (c !== null && !mapa.has(c)) mapa.set(c, desde + i);
+        });
+      }
+    }
+  }
+  return mapa;
+}
+
+/** La tabla /W de una tipografía CID: «código [anchos…]» o «desde hasta ancho». */
+function leerAnchosW(arr) {
+  const anchos = new Map();
+  let i = 0;
+  while (i < arr.length) {
+    const a = arr.get(i);
+    if (!a || !a.isNumber()) { i++; continue; }
+    const c1 = a.asNumber();
+    const seg = arr.get(i + 1);
+    if (seg && seg.isArray()) {
+      for (let k = 0; k < seg.length; k++) {
+        const w = seg.get(k);
+        if (w && w.isNumber()) anchos.set(c1 + k, w.asNumber());
+      }
+      i += 2;
+    } else if (seg && seg.isNumber()) {
+      const c2 = seg.asNumber(), w = arr.get(i + 2);
+      const ww = w && w.isNumber() ? w.asNumber() : 0;
+      for (let c = c1; c <= c2 && c - c1 < 65536; c++) anchos.set(c, ww);
+      i += 3;
+    } else i++;
+  }
+  return anchos;
+}
+
+const PREFIJO = /^[A-Z]{6}\+/;
+const sinPrefijo = (n) => String(n || '').replace(PREFIJO, '');
+
+/**
+ * Busca en la hoja la tipografía que se llama así y devuelve con qué
+ * pedirla: su nombre de recurso, con qué número va cada letra, cuánto mide
+ * cada una y si los números son de uno o de dos bytes.
+ */
+function fuentesIncrustadas(pagina, nombreFuente) {
+  if (!nombreFuente) return [];
+  const salida = [];
+  try {
+    const rec = recursosDe(pagina.getObject());
+    const fuentes = rec && rec.get('Font');
+    if (!fuentes || !fuentes.isDictionary()) return [];
+    const buscado = sinPrefijo(nombreFuente).toLowerCase();
+    // Una hoja puede traer VARIAS entradas con el mismo nombre y subconjuntos
+    // distintos —Chrome lo hace—, así que se recogen todas y luego se usa la
+    // que tenga las letras que hacen falta.
+    const claves = [];
+    fuentes.forEach((v, k) => {
+      if (!v || !v.isDictionary()) return;
+      const bf = v.get('BaseFont');
+      if (!bf || !bf.isName()) return;
+      if (sinPrefijo(bf.asName()).toLowerCase() === buscado) claves.push(k);
+    });
+    for (const clave of claves) {
+      const d = describirFuente(fuentes.get(clave), clave);
+      if (d) salida.push(d);
+    }
+  } catch (e) { /* si no se puede mirar, no se inventa nada */ }
+  return salida;
+}
+
+function describirFuente(obj, clave) {
+  try {
+    if (!obj || !obj.isDictionary()) return null;
+    const tu = obj.get('ToUnicode');
+    if (!tu || !tu.isStream || !tu.isStream()) return null;
+    const codigos = leerToUnicode(new TextDecoder().decode(new Uint8Array(tu.readStream().asUint8Array())));
+    if (!codigos.size) return null;
+
+    const sub = obj.get('Subtype');
+    const esCID = sub && sub.isName() && sub.asName() === 'Type0';
+    let anchos = new Map(), porDefecto = esCID ? 1000 : 500;
+    if (esCID) {
+      const hija = obj.get('DescendantFonts');
+      const d0 = hija && hija.isArray() && hija.length ? hija.get(0) : null;
+      if (d0 && d0.isDictionary()) {
+        const dw = d0.get('DW');
+        if (dw && dw.isNumber()) porDefecto = dw.asNumber();
+        const w = d0.get('W');
+        if (w && w.isArray()) anchos = leerAnchosW(w);
+      }
+    } else {
+      const primero = obj.get('FirstChar'), lista = obj.get('Widths');
+      if (primero && primero.isNumber() && lista && lista.isArray()) {
+        const p = primero.asNumber();
+        for (let i = 0; i < lista.length; i++) {
+          const w = lista.get(i);
+          if (w && w.isNumber()) anchos.set(p + i, w.asNumber());
+        }
+      }
+    }
+    return { clave, obj, codigos, anchos, porDefecto, bytes: esCID ? 2 : 1 };
+  } catch (e) { return null; }
+}
+
+/**
+ * Devuelve la tipografía a los recursos de la hoja si hizo falta.
+ *
+ * Al redactar el renglón, si esa tipografía no la usaba nadie más en la
+ * hoja, MuPDF la borra de los recursos —hace bien, ya no la usa nadie— y
+ * entonces el texto nuevo se escribiría pidiendo una tipografía que ya no
+ * está. Por eso se mira ANTES de redactar y se replanta DESPUÉS.
+ */
+function plantarFuente(objPag, f) {
+  if (!f || !f.ref || !f.clave) return;
+  const fuentes = fuentesDe(objPag);
+  const hay = fuentes.get(f.clave);
+  if (hay && hay.isDictionary && hay.isDictionary()) return;
+  fuentes.put(f.clave, f.ref);
+}
+
+/** La cadena tal como se pide en el flujo, o null si falta alguna letra. */
+function cadenaIncrustada(f, texto) {
+  let hex = '';
+  for (const c of texto) {
+    const cod = f.codigos.get(c);
+    if (cod === undefined) return null;
+    hex += cod.toString(16).toUpperCase().padStart(f.bytes * 2, '0');
+  }
+  return '<' + hex + '>';
+}
+
+function medirIncrustada(f, texto, tam) {
+  let suma = 0;
+  for (const c of texto) {
+    const cod = f.codigos.get(c);
+    suma += cod !== undefined && f.anchos.has(cod) ? f.anchos.get(cod) : f.porDefecto;
+  }
+  return suma * tam / 1000;
+}
+
+/**
+ * Con qué se va a escribir este texto en esta hoja: si la tipografía del
+ * propio documento sirve, esa; si no, la equivalente de serie de siempre.
+ * Devuelve ya todo resuelto —el nombre del recurso, la cadena y el ancho—
+ * para que quien escribe no tenga que saber de cuál se trata.
+ */
+function conQueEscribir(pagina, objPag, nombreFuente, rasgos, texto, tam, cache) {
+  // Un renglón se reescribe trozo a trozo y cada trozo pregunta por su
+  // tipografía. Sin recordar la respuesta se leería el mismo /ToUnicode cien
+  // veces y se meterían cien tipografías de serie iguales en la hoja.
+  const llave = String(nombreFuente) + '|' + JSON.stringify(rasgos || {});
+  let base = cache && cache.get(llave);
+  if (!base) {
+    base = { propias: fuentesIncrustadas(pagina, nombreFuente) };
+    if (cache) cache.set(llave, base);
+  }
+
+  /* Se parte el texto en tramos: cada letra va con la tipografía incrustada
+     que la tenga. Una misma hoja puede traer varios subconjuntos del mismo
+     tipo de letra —Chrome los parte— y entre todos suelen tener todo lo que
+     hace falta; como son el mismo tipo de letra, juntarlos no se nota. Lo
+     que no esté en ninguno va con la equivalente de serie. */
+  const tramos = [];
+  for (const c of texto) {
+    const donde = base.propias.find((p) => p.codigos.has(c)) || null;
+    const id = donde ? donde.clave : '';
+    const ultimo = tramos[tramos.length - 1];
+    if (ultimo && ultimo.id === id) ultimo.texto += c;
+    else tramos.push({ id, donde, texto: c });
+  }
+
+  const deSerie = () => {
+    if (!base.serie) {
+      const elegida = resolverFuente(nombreFuente, rasgos);
+      const clave = 'GrapaEd' + (contadorFuente++);
+      const ref = doc.addSimpleFont(elegida.fuente, 'Latin');
+      fuentesDe(objPag).put(clave, ref);
+      base.serie = { elegida, clave, ref };
+    }
+    return base.serie;
+  };
+
+  const trozos = [];
+  const refs = [];
+  let comoQueda = '', ancho = 0, perdidas = [], faltan = [], sustituida = false;
+  for (const t of tramos) {
+    if (t.donde) {
+      trozos.push({ clave: t.donde.clave, cadena: cadenaIncrustada(t.donde, t.texto),
+                    ancho: medirIncrustada(t.donde, t.texto, tam) });
+      refs.push({ clave: t.donde.clave, ref: t.donde.obj });
+      comoQueda += t.texto;
+      ancho += trozos[trozos.length - 1].ancho;
+    } else {
+      const serie = deSerie();
+      const queda = comoQuedara(t.texto);
+      const a = medirAncho(serie.elegida.fuente, queda.texto, tam);
+      trozos.push({ clave: serie.clave, cadena: '(' + escapar(queda.texto) + ')', ancho: a });
+      refs.push({ clave: serie.clave, ref: serie.ref });
+      comoQueda += queda.texto;
+      ancho += a;
+      perdidas = perdidas.concat(queda.perdidas);
+      faltan = faltan.concat([...t.texto].filter((c) => c !== ' '));
+      sustituida = true;
+    }
+  }
+
+  return {
+    trozos, refs, ancho, texto: comoQueda,
+    perdidas: [...new Set(perdidas)],
+    faltan: [...new Set(faltan)],
+    propia: !sustituida && trozos.length > 0,
+    sustituida,
+    nombre: sustituida ? deSerie().elegida.nombre : sinPrefijo(nombreFuente),
+  };
+}
+
 /* ---------- medir el ancho que ocupará un texto ---------- */
 function medirAncho(fuente, texto, tam) {
   let suma = 0;
@@ -245,17 +539,83 @@ function bytesDe(documento) {
   return copia;
 }
 
-/* ---------- escapar una cadena para el flujo del PDF ---------- */
+/* ---------- escribir una cadena en el flujo del PDF ----------
+
+   El texto se escribe en WinAnsi, que es lo que entienden las catorce
+   tipografías que todo lector trae de serie. Casi todo lo que hace falta en
+   castellano cabe —tildes, eñe, signos de apertura—, pero NO por su número
+   de Unicode: WinAnsi aprovecha los huecos del 128 al 159 para las comillas
+   tipográficas, las rayas, el punto de lista, los puntos suspensivos y el
+   euro, que en Unicode viven mucho más arriba.
+
+   Sin esa traducción, un correo pegado de Gmail —que escribe «así» las
+   comillas y usa raya en vez de guion— salía lleno de interrogantes; la
+   comprobación veía que lo escrito no era lo pedido y rechazaba el cambio
+   entero. Un renglón con una sola raya no había manera de corregirlo. */
+const WINANSI = new Map([
+  [0x20AC, 0x80], [0x201A, 0x82], [0x0192, 0x83], [0x201E, 0x84], [0x2026, 0x85],
+  [0x2020, 0x86], [0x2021, 0x87], [0x02C6, 0x88], [0x2030, 0x89], [0x0160, 0x8A],
+  [0x2039, 0x8B], [0x0152, 0x8C], [0x017D, 0x8E], [0x2018, 0x91], [0x2019, 0x92],
+  [0x201C, 0x93], [0x201D, 0x94], [0x2022, 0x95], [0x2013, 0x96], [0x2014, 0x97],
+  [0x02DC, 0x98], [0x2122, 0x99], [0x0161, 0x9A], [0x203A, 0x9B], [0x0153, 0x9C],
+  [0x017E, 0x9E], [0x0178, 0x9F],
+]);
+
+/* Lo que no cabe de ninguna manera, con su pariente más cercano: más vale
+   un guion corriente que un interrogante. */
+const PARECIDO = new Map(Object.entries({
+  '\u2010': '-', '\u2011': '-', '\u2012': '-', '\u2015': '-', '\u2212': '-',
+  '\u2043': '-', '\u00A0': ' ', '\u2002': ' ', '\u2003': ' ', '\u2007': ' ',
+  '\u2008': ' ', '\u2009': ' ', '\u200A': ' ', '\u202F': ' ', '\u3000': ' ',
+  '\u200B': '', '\u00AD': '', '\uFEFF': '',
+  '\u2032': "'", '\u2033': '"', '\u2035': "'", '\u2036': '"', '\u201B': "'",
+  '\u2027': '\u00B7', '\n': ' ', '\r': ' ', '\t': ' ',
+  // las ligaduras que mete la imprenta: se deshacen en sus letras
+  '\uFB00': 'ff', '\uFB01': 'fi', '\uFB02': 'fl', '\uFB03': 'ffi', '\uFB04': 'ffl',
+}));
+
+/** El código WinAnsi de una letra, o null si esa letra no está en WinAnsi. */
+function enWinAnsi(c) {
+  const n = c.codePointAt(0);
+  if (n >= 0x20 && n <= 0x7E) return n;
+  if (WINANSI.has(n)) return WINANSI.get(n);
+  if (n >= 0xA0 && n <= 0xFF) return n;
+  return null;
+}
+
+/**
+ * El texto TAL COMO VA A QUEDAR escrito, que no siempre es el que se pidió:
+ * lo que no cabe se cambia por su pariente más cercano. Devuelve además las
+ * letras que no tenían pariente, para poder decirlo en vez de dejar un
+ * interrogante en silencio.
+ *
+ * Todo lo que escribe y todo lo que comprueba pasa por aquí: si compararan
+ * cosas distintas, un cambio bueno parecería malo.
+ */
+function comoQuedara(texto) {
+  let salida = '';
+  const perdidas = [];
+  for (const c of String(texto == null ? '' : texto)) {
+    if (enWinAnsi(c) !== null) { salida += c; continue; }   // cabe tal cual
+    const cerca = PARECIDO.get(c);
+    if (cerca !== undefined) { salida += cerca; continue; }
+    perdidas.push(c);
+    salida += '?';
+  }
+  return { texto: salida, perdidas: [...new Set(perdidas)] };
+}
+
 function escapar(texto) {
-  return texto
-    .replace(/\\/g, '\\\\')
-    .replace(/\(/g, '\\(')
-    .replace(/\)/g, '\\)')
-    .replace(/[^\x20-\x7E]/g, (c) => {
-      // WinAnsi cubre los acentos del castellano
-      const n = c.charCodeAt(0);
-      return n < 256 ? '\\' + n.toString(8).padStart(3, '0') : '?';
-    });
+  let salida = '';
+  for (const c of comoQuedara(texto).texto) {
+    if (c === '\\') { salida += '\\\\'; continue; }
+    if (c === '(') { salida += '\\('; continue; }
+    if (c === ')') { salida += '\\)'; continue; }
+    const n = enWinAnsi(c);
+    if (n === null) { salida += '?'; continue; }
+    salida += n >= 0x20 && n <= 0x7E ? c : '\\' + n.toString(8).padStart(3, '0');
+  }
+  return salida;
 }
 
 /* ---------- abrir un documento ---------- */
@@ -471,7 +831,7 @@ function editar(indice, valorInicial) {
     ? 'Se tapará la zona y se escribirá encima'
     : r.uniforme
       ? 'Enter para aplicar · Esc para dejarlo'
-      : 'Cuidado: este renglón mezcla tipografías o tamaños')
+      : 'Mezcla tipografías: lo que no cambies se queda como está')
     + ' · vacío + Enter lo borra';
   ayuda.style.left = (r.bbox[0] * escala - 3) + 'px';
   ayuda.style.top = (r.bbox[3] * escala + 6) + 'px';
@@ -1127,7 +1487,7 @@ function aplicarCapa(pagina, modelo, marco) {
     const met = metricaDe(r.t || 'X');
     const tam = propio && r.tam ? r.tam : alto / Math.max(0.3, met.alto);
     const cual = propio && r.negrita ? negrita : normal;
-    const natural = medirAncho(cual, r.t || '', tam);
+    const natural = medirAncho(cual, comoQuedara(r.t || '').texto, tam);
     const hueco = (propio && r.hueco) || ancho;
     // el renglón corregido se encoge si no cabe, pero NO se estira: estirarlo
     // para rellenar el hueco del texto viejo deja las letras separadas y canta
@@ -1240,7 +1600,7 @@ function hacerCambio(accion, antes, despues) {
         hoja: paginaActual, antes, despues,
         encogido: resultado.encogido, tipografia: resultado.tipografia,
         sobreFoto: resultado.sobreFoto, borrado: resultado.borrado,
-        insertado: resultado.insertado,
+        insertado: resultado.insertado, propia: resultado.propia,
       });
       $('#btnDeshacer').disabled = false;
       cargando(false);
@@ -1249,12 +1609,20 @@ function hacerCambio(accion, antes, despues) {
       refrescarHallazgosDe(paginaActual);
       descargado = false;
       apuntarTrabajo();
-      avisar(resultado.borrado ? 'Renglón borrado.'
+      const perdidas = (resultado.cambiadas && resultado.cambiadas.length
+        ? ' La tipografía no tiene ' + resultado.cambiadas.map((c) => '«' + c + '»').join(', ')
+          + '; quedó como «?».'
+        : '')
+        + (resultado.faltan && resultado.faltan.length
+          ? ' Escrito en ' + resultado.tipografia + ': la del documento no trae '
+            + resultado.faltan.slice(0, 4).map((c) => '«' + c + '»').join(', ') + '.'
+          : '');
+      avisar((resultado.borrado ? 'Renglón borrado.'
         : resultado.insertado
           ? 'Escrito' + (resultado.tipografia ? ' en ' + resultado.tipografia : '') + '.'
           : (resultado.sobreFoto ? 'Cambiado sobre la foto' : 'Cambiado')
-            + (resultado.encogido ? `, ajustado al ancho original (${resultado.encogido} %)` : '') + '.',
-        'bien');
+            + (resultado.encogido ? `, ajustado al ancho original (${resultado.encogido} %)` : '') + '.')
+        + perdidas, perdidas ? 'mal' : 'bien');
     } catch (e) {
       abrirBytes(respaldo, nombre);
       cargando(false);
@@ -1322,14 +1690,70 @@ function reescribirEnEscaneo(indice, textoNuevo) {
 
   const comprobar = PDFDocument.openDocument(salida, 'application/pdf');
   const texto = comprobar.loadPage(paginaActual).toStructuredText('preserve-whitespace').asText();
-  if (textoNuevo && !texto.includes(textoNuevo.trim())) return volver('El texto nuevo no quedó donde debía; no se cambió nada.');
+  const queda = comoQuedara(textoNuevo);
+  if (textoNuevo && !texto.includes(queda.texto.trim())) return volver('El texto nuevo no quedó donde debía; no se cambió nada.');
   if (antes.trim() && texto.includes(antes.trim())) return volver('El texto viejo seguía ahí; no se cambió nada.');
 
   bytesActuales = salida;
   abrirBytes(salida, nombre);
-  return { ok: true, sobreFoto: true, borrado: !textoNuevo };
+  return { ok: true, sobreFoto: true, borrado: !textoNuevo, cambiadas: queda.perdidas };
 }
 
+
+/* ---------- el reparto de un renglón en trozos ----------
+   Para no perder lo que el renglón lleva dentro hay que saber qué parte de
+   verdad ha cambiado: se mira hasta dónde coinciden el texto viejo y el
+   nuevo por delante y por detrás. */
+function comunPorDelante(a, b) {
+  let i = 0;
+  while (i < a.length && i < b.length && a[i] === b[i]) i++;
+  return i;
+}
+
+function comunPorDetras(a, b, tope) {
+  let i = 0;
+  while (i < tope && a[a.length - 1 - i] === b[b.length - 1 - i]) i++;
+  return i;
+}
+
+/**
+ * Reparte el renglón corregido en trozos: lo que no ha cambiado por
+ * delante, lo que se escribe nuevo y lo que no ha cambiado por detrás.
+ *
+ * Cada letra que no cambia se vuelve a escribir CON SU LETRA Y EN SU SITIO
+ * —la misma tipografía incrustada, el mismo color, la misma coordenada—, de
+ * modo que un párrafo con una palabra en negrita y un enlace en azul los
+ * conserva aunque se corrija un número del medio. Antes se reescribía todo
+ * con la tipografía de la primera letra y se perdía lo demás.
+ *
+ * Si las letras del renglón no cuadran con su texto —una hoja reconocida,
+ * por ejemplo— se devuelve un trozo único, que es lo que se hacía siempre.
+ */
+function repartirRenglon(r, textoNuevo) {
+  const viejo = [...r.texto], nuevo = [...textoNuevo];
+  const letras = r.letras && r.letras.length === viejo.length ? r.letras : null;
+  if (!letras) {
+    return [{ texto: textoNuevo, x: r.x, y: r.y, medio: true, hueco: r.bbox[2] - r.bbox[0],
+              fuente: r.fuente, rasgos: r.rasgos, size: r.size, color: r.color }];
+  }
+  const comoEra = (k, extra) => Object.assign({
+    x: k.x, y: k.y, fuente: k.fuente, rasgos: k.rasgos, size: k.size, color: k.color,
+  }, extra);
+
+  const p = comunPorDelante(viejo, nuevo);
+  const s = comunPorDetras(viejo, nuevo, Math.min(viejo.length, nuevo.length) - p);
+  const hasta = viejo.length - s;
+  const medio = nuevo.slice(p, nuevo.length - s).join('');
+  const modelo = letras[Math.min(p, letras.length - 1)];
+  const xMedio = p < letras.length ? letras[p].x : r.bbox[2];
+  const xFin = hasta < letras.length ? letras[hasta].x : r.bbox[2];
+
+  const piezas = [];
+  for (let i = 0; i < p; i++) piezas.push(comoEra(letras[i], { texto: viejo[i] }));
+  piezas.push(comoEra(modelo, { texto: medio, x: xMedio, medio: true, hueco: xFin - xMedio }));
+  for (let i = hasta; i < letras.length; i++) piezas.push(comoEra(letras[i], { texto: viejo[i], sufijo: true }));
+  return piezas;
+}
 
 function reescribir(indice, textoNuevo) {
   const r = renglones[indice];
@@ -1338,6 +1762,20 @@ function reescribir(indice, textoNuevo) {
 
   const raro = giroRaro(marco);
   if (raro) return { ok: false, motivo: raro };
+
+  // El renglón se reparte en trozos y cada uno guarda su letra: así lo que
+  // no cambia se vuelve a escribir tal y como estaba —misma tipografía,
+  // mismo color, mismo sitio— y no se pierde la palabra en negrita ni el
+  // enlace en azul que hubiera dentro.
+  //
+  // Las tipografías se miran ANTES de redactar: al quitar el renglón, la
+  // que no use nadie más en la hoja se la lleva la redacción por delante.
+  const objPag = pagina.getObject();
+  const cacheFuentes = new Map();
+  const piezas = textoNuevo ? repartirRenglon(r, textoNuevo) : [];
+  for (const t of piezas) {
+    t.f = conQueEscribir(pagina, objPag, t.fuente, t.rasgos, t.texto, t.size, cacheFuentes);
+  }
 
   // 1. quitar el texto viejo de dentro del archivo, no taparlo
   const an = pagina.createAnnotation('Redact');
@@ -1366,35 +1804,41 @@ function reescribir(indice, textoNuevo) {
     return { ok: true, borrado: true };
   }
 
-  // 2. volver a escribir el renglón completo, en su misma línea base
-  const elegida = resolverFuente(r.fuente, r.rasgos);
-  const fuente = elegida.fuente;
-  const clave = 'GrapaEd' + (contadorFuente++);
-  const refFuente = doc.addSimpleFont(fuente, 'Latin');
-  const objPag = pagina.getObject();
-  let rec = objPag.get('Resources');
-  if (!rec.isDictionary()) { rec = doc.addObject(doc.newDictionary()); objPag.put('Resources', rec); }
-  let fuentes = rec.get('Font');
-  if (!fuentes.isDictionary()) { fuentes = doc.addObject(doc.newDictionary()); rec.put('Font', fuentes); }
-  fuentes.put(clave, refFuente);
+  // 2. volver a escribir el renglón, trozo a trozo y cada uno en su sitio
+  for (const t of piezas) for (const rf of t.f.refs) plantarFuente(objPag, rf);
 
-  // si el texto nuevo es más largo, se aprieta un poco para no invadir
-  // lo que tiene al lado; nunca por debajo del 75 %
-  const anchoViejo = r.bbox[2] - r.bbox[0];
-  const anchoNuevo = medirAncho(fuente, textoNuevo, r.size);
-  let tz = 100, encogido = 0;
-  if (anchoViejo > 1 && anchoNuevo > anchoViejo * 1.01) {
-    tz = Math.max(75, (anchoViejo / anchoNuevo) * 100);
-    encogido = Math.round(tz);
+  // El trozo cambiado se aprieta para que quepa en el hueco que dejó el
+  // viejo; así lo que va detrás no se mueve. Si ni apretándolo cabe, se
+  // corre lo de detrás, que es lo que hace cualquier editor.
+  const cambiada = piezas.find((t) => t.medio);
+  let tz = 100, encogido = 0, corrimiento = 0;
+  if (cambiada) {
+    const hueco = Math.max(0, cambiada.hueco);
+    if (hueco > 0.5 && cambiada.f.ancho > hueco * 1.01) {
+      tz = Math.max(70, (hueco / cambiada.f.ancho) * 100);
+      encogido = Math.round(tz);
+    }
+    corrimiento = cambiada.f.ancho * (tz / 100) - hueco;
   }
 
-  const [cr, cg, cb] = r.color || [0, 0, 0];
+  // Todo en UN solo bloque de texto: emitido de una vez, el lector lo lee
+  // como un renglón. Suelto en flujos distintos lo partiría en varios, y
+  // entonces buscar «12:30» en el PDF ya no encontraría nada.
   const buf = new Buffer();
-  buf.writeLine(
-    'q BT /' + clave + ' ' + r.size + ' Tf ' + tz.toFixed(2) + ' Tz ' +
-    cr.toFixed(4) + ' ' + cg.toFixed(4) + ' ' + cb.toFixed(4) + ' rg ' +
-    matrizTexto(marco, r.x, r.y) + ' (' + escapar(textoNuevo) + ') Tj ET Q'
-  );
+  buf.writeLine('q BT');
+  for (const t of piezas) {
+    if (!t.texto) continue;
+    const [cr, cg, cb] = t.color || [0, 0, 0];
+    const tzT = t.medio ? tz : 100;
+    let x = t.x + (t.sufijo ? corrimiento : 0);
+    for (const sub of t.f.trozos) {
+      buf.writeLine('/' + sub.clave + ' ' + t.size + ' Tf ' + tzT.toFixed(2) + ' Tz '
+        + cr.toFixed(4) + ' ' + cg.toFixed(4) + ' ' + cb.toFixed(4) + ' rg '
+        + matrizTexto(marco, x, t.y) + ' ' + sub.cadena + ' Tj');
+      x += sub.ancho * (tzT / 100);
+    }
+  }
+  buf.writeLine('ET Q');
   const refFlujo = doc.addStream(buf, {});
   let cont = objPag.get('Contents');
   if (cont.isArray()) { cont.push(refFlujo); }
@@ -1404,7 +1848,14 @@ function reescribir(indice, textoNuevo) {
   const salida = bytesDe(doc);
   const comprobar = PDFDocument.openDocument(salida, 'application/pdf');
   const nuevos = leerRenglones(comprobar.loadPage(paginaActual));
-  const puesto = nuevos.find((x) => x.texto.trim() === textoNuevo.trim());
+  // Puede haber dos renglones iguales en la misma hoja —«EE.TT.», una fila
+  // repetida— y entonces quedarse con el primero que aparezca daría por
+  // corrido un cambio que está en su sitio. Se toma el más cercano.
+  const esperado = piezas.map((t) => t.f.texto).join('');
+  const puesto = nuevos
+    .filter((x) => x.texto.trim() === esperado.trim())
+    .sort((a, b) => (Math.abs(a.x - r.x) + Math.abs(a.y - r.y))
+                  - (Math.abs(b.x - r.x) + Math.abs(b.y - r.y)))[0];
   if (!puesto) {
     return { ok: false, motivo: 'El texto nuevo no quedó donde debía; no se cambió nada.' };
   }
@@ -1422,8 +1873,12 @@ function reescribir(indice, textoNuevo) {
 
   bytesActuales = salida;
   abrirBytes(salida, nombre);
+  const dueña = cambiada || piezas[0];
   return { ok: true, encogido, desvio,
-           tipografia: elegida.sustituida ? elegida.nombre : '' };
+           cambiadas: [...new Set(piezas.flatMap((t) => t.f.perdidas))],
+           propia: !!(dueña && dueña.f.propia),
+           tipografia: dueña && dueña.f.sustituida ? dueña.f.nombre : '',
+           faltan: (dueña && dueña.f.faltan) || [] };
 }
 
 /* ---------- escribir donde no había nada ----------
@@ -1470,22 +1925,24 @@ function insertarRenglon(x, y, texto) {
 }
 
 function insertarEnTexto(pagina, marco, x, y, texto) {
-  const { tam, color, elegida } = letraParaInsertar(x, y);
+  const { tam, color, cerca } = letraParaInsertar(x, y);
   const objPag = pagina.getObject();
   envolverCerrado(objPag);
 
-  const clave = 'GrapaEd' + (contadorFuente++);
-  let rec = objPag.get('Resources');
-  if (!rec.isDictionary()) { rec = doc.addObject(doc.newDictionary()); objPag.put('Resources', rec); }
-  let fuentes = rec.get('Font');
-  if (!fuentes.isDictionary()) { fuentes = doc.addObject(doc.newDictionary()); rec.put('Font', fuentes); }
-  fuentes.put(clave, doc.addSimpleFont(elegida.fuente, 'Latin'));
+  const f = conQueEscribir(pagina, objPag, cerca ? cerca.fuente : 'Helvetica',
+                           cerca ? cerca.rasgos : null, texto, tam);
 
   const [cr, cg, cb] = color;
   const buf = new Buffer();
-  buf.writeLine('q BT /' + clave + ' ' + tam.toFixed(2) + ' Tf '
-    + cr.toFixed(4) + ' ' + cg.toFixed(4) + ' ' + cb.toFixed(4) + ' rg '
-    + matrizTexto(marco, x, y) + ' (' + escapar(texto) + ') Tj ET Q');
+  buf.writeLine('q BT');
+  let cursor = x;
+  for (const sub of f.trozos) {
+    buf.writeLine('/' + sub.clave + ' ' + tam.toFixed(2) + ' Tf '
+      + cr.toFixed(4) + ' ' + cg.toFixed(4) + ' ' + cb.toFixed(4) + ' rg '
+      + matrizTexto(marco, cursor, y) + ' ' + sub.cadena + ' Tj');
+    cursor += sub.ancho;
+  }
+  buf.writeLine('ET Q');
   const flujo = doc.addStream(buf, {});
   const cont = objPag.get('Contents');
   if (cont.isArray()) { cont.push(flujo); }
@@ -1495,7 +1952,10 @@ function insertarEnTexto(pagina, marco, x, y, texto) {
   const salida = bytesDe(doc);
   const comprobar = PDFDocument.openDocument(salida, 'application/pdf');
   const nuevos = leerRenglones(comprobar.loadPage(paginaActual));
-  const puesto = nuevos.find((n) => n.texto.trim() === texto.trim());
+  const puesto = nuevos
+    .filter((n) => n.texto.trim() === f.texto.trim())
+    .sort((a, b) => (Math.abs(a.x - x) + Math.abs(a.y - y))
+                  - (Math.abs(b.x - x) + Math.abs(b.y - y)))[0];
   if (!puesto) return { ok: false, motivo: 'El texto no llegó a escribirse; no se cambió nada.' };
   const desvio = Math.max(Math.abs(puesto.x - x), Math.abs(puesto.y - y));
   if (desvio > 1.5) {
@@ -1509,7 +1969,8 @@ function insertarEnTexto(pagina, marco, x, y, texto) {
 
   bytesActuales = salida;
   abrirBytes(salida, nombre);
-  return { ok: true, insertado: true, tipografia: elegida.sustituida ? elegida.nombre : '' };
+  return { ok: true, insertado: true, cambiadas: f.perdidas, propia: f.propia,
+           tipografia: f.sustituida ? f.nombre : '', faltan: f.faltan };
 }
 
 function insertarEnEscaneo(pagina, modelo, marco, x, y, texto) {
@@ -1525,13 +1986,13 @@ function insertarEnEscaneo(pagina, modelo, marco, x, y, texto) {
   const salida = aplicarCapa(pagina, modelo, marco);
   const comprobar = PDFDocument.openDocument(salida, 'application/pdf');
   const txt = comprobar.loadPage(paginaActual).toStructuredText('preserve-whitespace').asText();
-  if (!txt.includes(texto.trim())) {
+  if (!txt.includes(comoQuedara(texto).texto.trim())) {
     modelo.renglones.pop();
     return { ok: false, motivo: 'El texto no llegó a escribirse; no se cambió nada.' };
   }
   bytesActuales = salida;
   abrirBytes(salida, nombre);
-  return { ok: true, insertado: true, sobreFoto: true };
+  return { ok: true, insertado: true, sobreFoto: true, cambiadas: comoQuedara(texto).perdidas };
 }
 
 /* ---------- buscar y reemplazar en todo el documento ----------
@@ -1646,10 +2107,10 @@ function pintarHallazgos() {
     li.append(donde, linea);
 
     const motivo = motivosFallo.get(x.hoja + '·' + x.texto);
-    if (!x.uniforme || motivo) {
+    if (motivo) {
       const p = document.createElement('div');
       p.className = 'porque';
-      p.textContent = motivo || 'Mezcla tipografías: «Todas» no lo toca, cámbialo a mano.';
+      p.textContent = motivo;
       li.append(p);
     }
     li.addEventListener('click', () => irAlHallazgo(i));
@@ -1676,7 +2137,7 @@ function irAlHallazgo(i) {
   // con texto de reemplazo puesto, el campo se abre con el cambio ya escrito:
   // basta mirar que está bien y pulsar Enter
   const nuevo = $('#reemplazarTexto').value;
-  if (nuevo && x.uniforme) editar(idx, sustituirEn(x.texto, ultimaAguja, nuevo));
+  if (nuevo) editar(idx, sustituirEn(x.texto, ultimaAguja, nuevo));
 }
 
 async function reemplazarTodas() {
@@ -1686,13 +2147,9 @@ async function reemplazarTodas() {
   if (nuevo === aguja) { avisar('El texto nuevo es igual al que buscas.', 'mal'); return; }
 
   const plan = new Map();              // hoja → Map(texto del renglón → veces)
-  let saltados = 0;
   for (let h = 0; h < totalPaginas; h++) {
     for (const l of renglonesDeHoja(doc.loadPage(h))) {
       if (!posicionesDe(l.texto, aguja).length) continue;
-      // un renglón que mezcla tipografías se reescribiría entero con la de su
-      // primera letra: se deja para que lo cambie a mano, viendo el aviso
-      if (l.uniforme === false) { saltados++; continue; }
       if (!plan.has(h)) plan.set(h, new Map());
       const m = plan.get(h);
       m.set(l.texto, (m.get(l.texto) || 0) + 1);
@@ -1700,7 +2157,7 @@ async function reemplazarTodas() {
   }
   const cuantos = [...plan.values()]
     .reduce((n, m) => n + [...m.values()].reduce((a, b) => a + b, 0), 0);
-  if (!cuantos && !saltados) { avisar('No aparece «' + aguja + '» en ninguna hoja.', 'mal'); return; }
+  if (!cuantos) { avisar('No aparece «' + aguja + '» en ninguna hoja.', 'mal'); return; }
 
   const respaldo = bytesActuales;
   const cambiosAntes = cambios.slice();
@@ -1753,10 +2210,9 @@ async function reemplazarTodas() {
 
   await buscarEnTodo(true);
   const partes = [hechos + (hechos === 1 ? ' renglón cambiado' : ' renglones cambiados')];
-  if (saltados) partes.push(saltados + ' sin tocar por mezclar tipografías');
   if (fallos) partes.push(fallos + ' que no se pudieron');
-  avisar(partes.join(' · ') + (saltados || fallos ? '. Están marcados en la lista.' : '.'),
-         fallos || saltados ? 'mal' : 'bien');
+  avisar(partes.join(' · ') + (fallos ? '. Están marcados en la lista.' : '.'),
+         fallos ? 'mal' : 'bien');
 }
 
 
@@ -1792,7 +2248,9 @@ function campoInsertar(xHoja, yHoja) {
 
   const ayuda = document.createElement('div');
   ayuda.className = 'campo-ayuda';
-  ayuda.textContent = 'Se escribirá en ' + letra.elegida.nombre + ' de ' + tam.toFixed(1) + ' pt'
+  ayuda.textContent = 'Se escribirá en '
+    + (letra.cerca ? sinPrefijo(letra.cerca.fuente) : letra.elegida.nombre)
+    + ' de ' + tam.toFixed(1) + ' pt'
     + (letra.cerca ? ', la letra del renglón más cercano' : '') + ' · Enter para ponerlo · Esc para dejarlo';
   ayuda.style.left = (xHoja * escala - 3) + 'px';
   ayuda.style.top = (yHoja * escala + 8) + 'px';
@@ -1835,7 +2293,8 @@ function pintarCambios() {
     donde.textContent = 'Hoja ' + (c.hoja + 1)
       + (c.encogido ? ' · ajustado al ' + c.encogido + ' %' : '')
       + (c.sobreFoto ? ' · sobre la foto' : '')
-      + (c.tipografia ? ' · escrito en ' + c.tipografia : '');
+      + (c.tipografia ? ' · escrito en ' + c.tipografia
+         : c.propia ? ' · con la letra del documento' : '');
     const a = document.createElement('div'); a.className = 'antes';
     const b = document.createElement('div'); b.className = 'despues';
     if (c.antes) a.textContent = c.antes;

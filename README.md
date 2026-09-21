@@ -92,11 +92,9 @@ Dos cosas que conviene saber:
 
 - Los cinco, doce o veinte cambios dejan **un solo paso que deshacer**, no
   veinte: un `Ctrl+Z` los quita todos.
-- Un renglón que **mezcla tipografías o tamaños** no lo toca «Todas», porque
-  reescribirlo entero con la tipografía de su primera letra estropearía el
-  renglón. Queda marcado en la lista para cambiarlo a mano, que es donde sale
-  el aviso. Lo mismo con los que fallen por cualquier otro motivo: se dice
-  cuántos y por qué.
+- Los renglones que mezclan tipografías también se cambian: lo que no cambia
+  conserva su letra (ver más abajo). Si alguno falla por otro motivo, se dice
+  cuántos y por qué, y quedan marcados en la lista.
 
 ---
 
@@ -114,22 +112,58 @@ Dos cosas que conviene saber:
   resultante, mide dónde quedó el texto y verifica que no se haya llevado por
   delante ningún renglón vecino. Si algo no cuadra, deshace solo y te lo dice.
 
+### Comillas, rayas y demás letra de imprenta
+
+El texto se escribe en WinAnsi, que es lo que entienden las catorce tipografías
+de serie. Casi todo lo que hace falta cabe, pero **no por su número de
+Unicode**: las comillas tipográficas (« “ ” »), la raya (–), la raya larga (—),
+el punto de lista (•), los puntos suspensivos (…) y el euro (€) están en
+WinAnsi en otro sitio. Sin esa traducción salían como interrogantes, la
+comprobación veía que lo escrito no era lo pedido y **rechazaba el cambio
+entero**: un renglón con una sola raya no había manera de corregirlo, y un
+correo pegado de Gmail está lleno de ellas.
+
+Lo que no existe en WinAnsi de ninguna manera (una flecha, un emoji) se escribe
+como `?` y **se dice cuál era**, en vez de dejarlo en silencio.
+
+### Se escribe con la letra del propio documento
+
+La tipografía buena ya viaja dentro del PDF, incrustada. El editor la usa: lee
+su `/ToUnicode` —la tabla con la que el lector copia y pega— para saber con qué
+número se pide cada letra, y sus anchos para medirla. Así el renglón corregido
+no solo está en el mismo sitio y del mismo tamaño: **es la misma letra**.
+
+Un PDF incrusta solo las letras que usó, así que a veces falta alguna. Cuando
+pasa se dice cuál y se escribe ese trozo con la equivalente de serie, que es lo
+que se hacía siempre. Una misma hoja puede traer varios subconjuntos del mismo
+tipo de letra —Chrome los parte—, y entre todos suelen tener lo que hace falta.
+
+### No se pierde lo que el renglón lleva dentro
+
+Un párrafo puede llevar una palabra en negrita, un trozo subrayado y un enlace
+en azul. Antes, corregir una cifra reescribía el renglón entero con la letra de
+su primera letra y **se llevaba todo eso por delante**.
+
+Ahora se mira hasta dónde coinciden el texto viejo y el nuevo por delante y por
+detrás, y se vuelve a escribir letra por letra: lo que no ha cambiado, con su
+misma tipografía, su mismo color y su misma coordenada; y solo lo de en medio
+como texto nuevo. Si lo nuevo es más ancho que el hueco que deja lo viejo, se
+aprieta hasta un 70 % para que lo de detrás no se mueva; si aun así no cabe, se
+corre lo de detrás.
+
+Todo va en **un solo bloque de texto**, para que el PDF lo siga leyendo como un
+renglón: partido en trozos sueltos, buscar «12:30» en el documento ya no
+encontraría nada.
+
 **Lo que todavía no**
 
-- Renglones que mezclan varias tipografías o tamaños: deja escribir, pero
-  advierte antes, porque el renglón se reescribe con la tipografía de su
-  primera letra.
 - **Devolver un escaneo corregido a su estado original.** La capa se puede
   volver a escribir, pero el editor no guarda el texto que había antes de la
   primera corrección. Dentro de la misma sesión, `Ctrl+Z`.
 - **Reproducir una tipografía manuscrita o poco corriente** al corregir un
   escaneo: se escribe con la equivalente estándar, normal o negrita.
-- La tipografía que se escribe es la equivalente estándar (las catorce que
-  todo lector de PDF trae de serie), no la copia incrustada del original.
-  Se elige respetando **negrita, cursiva, gracias y monoespaciado**, y
-  cuando hay sustitución se dice cuál se usó en la lista de cambios. En
-  documentos corrientes —Arial, Calibri, Times— no se nota; en una
-  tipografía con personalidad, sí.
+- Cambiar el **tamaño, el color o la negrita** de un renglón a mano: se
+  conservan los del original, pero no se pueden elegir.
 
 ---
 
@@ -203,6 +237,12 @@ node pruebas/buscar.mjs       # buscar en las cinco hojas y reemplazar de una
 node pruebas/borrar-insertar.mjs   # borrar un renglón y escribir donde no
                               # había nada, en hoja de texto y en escaneo:
                               # en el escaneo se mide la propia foto
+node pruebas/hacer-solicitud.mjs # rehace el correo de Gmail de prueba
+node pruebas/tipografia.mjs   # que el renglón corregido conserve la letra
+                              # del documento y lo que llevara dentro
+node pruebas/solicitud.mjs    # un correo de trabajo entero: que se dejen
+                              # corregir TODOS sus renglones, y que las
+                              # comillas y las rayas salgan tal cual
 node pruebas/hacer-firmado.mjs # rehace el PDF con firma digital
 node pruebas/firmado.mjs      # que avise de la firma antes de tocar nada
 node pruebas/hacer-girado.mjs # rehace los archivos de hojas giradas
