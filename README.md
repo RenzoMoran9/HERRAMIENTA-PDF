@@ -82,8 +82,25 @@ el motor y el idioma viajan dentro del propio archivo.
 ### Y después se puede corregir
 
 Una vez reconocida, la hoja **sí se corrige**: pulsas un renglón, escribes, y
-Grapa tapa esa zona con el color del propio papel de ese renglón y escribe
-encima, con el color de su tinta y en negrita si el original lo era.
+Grapa lo sustituye copiándole al original todo lo que se puede medir sobre la
+propia imagen:
+
+| Se mide en el renglón original | Para qué |
+|---|---|
+| El color del **papel**, fila a fila | Se tapa con un trozo de papel de verdad, sacado de las filas limpias de al lado y degradado entre ellas. Un rectángulo liso se adivina a la primera. |
+| El **corazón del trazo**, no la media de lo oscuro | La media incluye los bordes suavizados y sale medio gris. |
+| Lo que ocupa **la tinta**, no el recuadro del reconocimiento | El recuadro es algo mayor, y dejaba la letra crecida. |
+| El **grosor del trazo** respecto a la altura | Dice si era negrita mucho mejor que la cantidad de tinta. |
+| Lo **blando** que es el borde | Un escaneo tiene el borde difuso; el texto vectorial lo tiene limpio, y esa es la diferencia que más canta. El renglón se compone como imagen con ese mismo desenfoque, y como desenfocar aclara la tinta, se mide lo que sale y se vuelve a componer hasta que el negro coincide. |
+
+Medido sobre una cotización escaneada de verdad, comparando el renglón
+corregido con el original:
+
+| | tinta | alto | borde blando |
+|---|---|---|---|
+| original | 68 | 11,0 pt | 0,234 |
+| primera versión | 99 | 12,0 pt | 0,087 |
+| ahora | 75 | 11,2 pt | 0,212 |
 
 Lo importante es que cambian **las dos cosas a la vez**: lo que se ve y lo que
 se busca. Si solo se tocara la capa invisible, el documento mostraría una cifra

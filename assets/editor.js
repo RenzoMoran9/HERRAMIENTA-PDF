@@ -4,7 +4,7 @@
    equipo, no hay servidor y no hace falta internet.
    =========================================================== */
 
-/*IMPORTA*/ import { PDFDocument, Font, Buffer, Matrix, ColorSpace } from '../lib/mupdf.js';
+/*IMPORTA*/ import { PDFDocument, Font, Buffer, Matrix, ColorSpace, Pixmap, Image } from '../lib/mupdf.js';
 /*IMPORTA-RECONOCER*/ import { reconocer } from './ocr.js';
 
 const $ = (s) => document.querySelector(s);
@@ -368,65 +368,181 @@ function editar(indice) {
   campo.select();
 }
 
-/* ---------- de qué color son el papel y la tinta ----------
-   Para corregir un renglón de un escaneo hay que taparlo, y taparlo de
-   blanco sobre un papel grisáceo o sobre una celda de tabla canta. Así que
-   se mira el papel de alrededor del renglón, y la tinta de dentro. */
-function coloresDe(pagina, caja) {
-  const pix = pagina.toPixmap(Matrix.scale(1, 1), ColorSpace.DeviceRGB, false, true);
-  const an = pix.getWidth(), al = pix.getHeight();
+/* ---------- medir un renglón de la foto ----------
+
+   Para que el renglón corregido no se note hay que copiarle tres cosas al
+   original, y las tres se miden aquí, sobre la propia imagen:
+
+     · el color del papel, para taparlo con el suyo y no con blanco;
+     · el color de la TINTA, que no es la media de lo oscuro —eso incluye
+       los bordes suavizados de cada letra y sale medio gris— sino el
+       corazón del trazo: solo lo más oscuro de entre lo que ya es tinta;
+     · lo que ocupa de verdad la letra, que es menos que el recuadro que da
+       el reconocimiento, y el grosor del trazo, que es lo que dice si el
+       renglón era negrita mucho mejor que la cantidad de tinta.
+
+   Se mira a 3 aumentos: a tamaño natural el trazo mide un píxel y medio y
+   no se puede medir nada. */
+const AUMENTO_MEDIDA = 3;
+
+function medirRenglon(pagina, caja) {
+  const A = AUMENTO_MEDIDA;
+  const pix = pagina.toPixmap(Matrix.scale(A, A), ColorSpace.DeviceRGB, false, true);
+  const anP = pix.getWidth(), alP = pix.getHeight();
   const n = pix.getNumberOfComponents(), salto = pix.getStride();
-  const px = new Uint8Array(pix.getPixels());   // copia: es una ventana a la memoria del motor
+  const px = new Uint8Array(pix.getPixels());
   pix.destroy();
 
-  const dentro = (x, y) => x >= 0 && y >= 0 && x < an && y < al;
-  const leer = (x, y) => { const o = y * salto + x * n; return [px[o], px[o + 1], px[o + 2]]; };
+  // se recorta con margen vertical suficiente para tener papel limpio arriba
+  // y abajo: de ahí sale el parche con el que se tapa el renglón
+  const altoCaja = Math.max(4, (caja[3] - caja[1]) * A);
+  const x0 = Math.max(0, Math.floor(caja[0] * A) - 2), x1 = Math.min(anP - 1, Math.ceil(caja[2] * A) + 2);
+  const y0 = Math.max(0, Math.floor(caja[1] * A - altoCaja)), y1 = Math.min(alP - 1, Math.ceil(caja[3] * A + altoCaja));
+  const dentroY0 = Math.floor(caja[1] * A) - y0, dentroY1 = Math.ceil(caja[3] * A) - y0;
+  const an = x1 - x0 + 1, al = y1 - y0 + 1;
+  if (an < 3 || al < 3) return null;
 
-  const x0 = Math.max(0, Math.floor(caja[0])), x1 = Math.min(an - 1, Math.ceil(caja[2]));
-  const y0 = Math.max(0, Math.floor(caja[1])), y1 = Math.min(al - 1, Math.ceil(caja[3]));
-
-  // papel: una banda justo encima y otra justo debajo del renglón
-  const papel = [];
-  for (const y of [y0 - 3, y0 - 2, y1 + 2, y1 + 3]) {
-    if (!dentro(x0, y)) continue;
-    for (let x = x0; x <= x1; x += 2) if (dentro(x, y)) papel.push(leer(x, y));
+  const lum = new Float32Array(an * al);
+  const rgb = new Uint8Array(an * al * 3);
+  for (let y = 0; y < al; y++) {
+    for (let x = 0; x < an; x++) {
+      const o = (y + y0) * salto + (x + x0) * n;
+      const i = y * an + x;
+      rgb[i * 3] = px[o]; rgb[i * 3 + 1] = px[o + 1]; rgb[i * 3 + 2] = px[o + 2];
+      lum[i] = (px[o] + px[o + 1] + px[o + 2]) / 3;
+    }
   }
-  // tinta: lo más oscuro de dentro del renglón
-  const puntos = [];
-  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
-    if (!dentro(x, y)) continue;
-    const c = leer(x, y);
-    puntos.push([c[0] + c[1] + c[2], c]);
-  }
-  puntos.sort((a, b) => a[0] - b[0]);
-  const oscuros = puntos.slice(0, Math.max(1, Math.round(puntos.length * 0.15)));
+  const dentro = (i) => { const y = (i / an) | 0; return y >= dentroY0 && y <= dentroY1; };
+  const lumDentro = [];
+  for (let i = 0; i < lum.length; i++) if (dentro(i)) lumDentro.push(lum[i]);
+  const orden = lumDentro.sort((a, b) => a - b);
+  const pct = (f) => orden[Math.min(orden.length - 1, Math.max(0, Math.round(orden.length * f)))];
+  const papelLum = pct(0.9);
+  const masOscuro = pct(0.01);
+  if (papelLum - masOscuro < 25) return null;          // ahí no hay texto que medir
+  const umbral = (papelLum + masOscuro) / 2;
 
-  const media = (lista) => {
-    if (!lista.length) return null;
+  // el papel, tomado de lo claro
+  const claros = [];
+  for (let i = 0; i < lum.length; i++) if (lum[i] >= papelLum - 6) claros.push(i);
+  const mediaDe = (idx) => {
     const s3 = [0, 0, 0];
-    for (const c of lista) { s3[0] += c[0]; s3[1] += c[1]; s3[2] += c[2]; }
-    return s3.map((v) => v / lista.length / 255);
+    for (const i of idx) { s3[0] += rgb[i * 3]; s3[1] += rgb[i * 3 + 1]; s3[2] += rgb[i * 3 + 2]; }
+    return s3.map((v) => v / idx.length / 255);
   };
-  const mediana = (lista) => {
-    if (!lista.length) return null;
-    return [0, 1, 2].map((i) => {
-      const v = lista.map((c) => c[i]).sort((a, b) => a - b);
-      return v[Math.floor(v.length / 2)] / 255;
-    });
+
+  // la tinta, tomada del CORAZÓN del trazo
+  const tintaIdx = [];
+  for (let i = 0; i < lum.length; i++) if (dentro(i) && lum[i] < umbral) tintaIdx.push(i);
+  if (tintaIdx.length < 12) return null;
+  tintaIdx.sort((a, b) => lum[a] - lum[b]);
+  const nucleo = tintaIdx.slice(0, Math.max(4, Math.round(tintaIdx.length * 0.25)));
+
+  // lo que ocupa de verdad, y el grosor del trazo
+  let arriba = al, abajo = -1, izq = an, der = -1;
+  const rachas = [];
+  for (let y = dentroY0; y <= dentroY1 && y < al; y++) {
+    let racha = 0;
+    for (let x = 0; x < an; x++) {
+      if (lum[y * an + x] < umbral) {
+        racha++;
+        if (y < arriba) arriba = y;
+        if (y > abajo) abajo = y;
+        if (x < izq) izq = x;
+        if (x > der) der = x;
+      } else if (racha) { rachas.push(racha); racha = 0; }
+    }
+    if (racha) rachas.push(racha);
+  }
+  if (abajo < arriba) return null;
+  rachas.sort((a, b) => a - b);
+  const grosor = rachas[Math.floor(rachas.length / 2)] || 1;
+
+  // Cuánto tarda el papel en volverse tinta: en un escaneo el borde de cada
+  // letra es blando y ocupa varios píxeles. Es lo que hace que el texto
+  // vectorial, de bordes limpios, cante al lado del escaneado.
+  let medios = 0, bordes = 0;
+  const bajo = masOscuro + (papelLum - masOscuro) * 0.25;
+  const alto2 = masOscuro + (papelLum - masOscuro) * 0.75;
+  for (let y = dentroY0; y <= dentroY1 && y < al; y++) {
+    let previo = null;
+    for (let x = 0; x < an; x++) {
+      const v = lum[y * an + x];
+      if (v > bajo && v < alto2) medios++;
+      const esTinta = v < umbral;
+      if (previo !== null && esTinta !== previo) bordes++;
+      previo = esTinta;
+    }
+  }
+  const suavidad = bordes ? Math.min(4, medios / bordes) : 1;
+  const altoTinta = (abajo - arriba + 1) / A;
+
+  // El parche: se buscan las filas SIN tinta —las de los márgenes— y se
+  // repiten para cubrir el renglón. Así el trozo tapado lleva el mismo grano
+  // y el mismo tono que el papel de al lado, en vez de un rectángulo liso
+  // que se adivina a la primera.
+  const limpias = [];
+  for (let y = 0; y < al; y++) {
+    if (y >= dentroY0 && y <= dentroY1) continue;
+    let sucia = false;
+    for (let x = 0; x < an; x++) if (lum[y * an + x] < umbral) { sucia = true; break; }
+    if (!sucia) limpias.push(y);
+  }
+  // El parche se estira hasta la primera fila de papel limpio por arriba y
+  // por abajo: si se queda en el recuadro del reconocimiento, los rabillos
+  // que sobresalen —tildes, palos altos— se quedan fuera y aparecen motas
+  // encima del renglón corregido. Parar en la fila limpia evita además
+  // comerse el renglón de al lado.
+  const filaSucia = (y) => {
+    for (let x = 0; x < an; x++) if (lum[y * an + x] < umbral) return true;
+    return false;
   };
-  // Cuánta tinta hay en el renglón: un renglón en negrita ennegrece bastante
-  // más superficie que uno normal del mismo tamaño. No es infalible, pero
-  // acierta en un documento corriente y no estropea nada si falla.
-  const umbral = 140;
-  let tinta = 0;
-  for (const [suma] of puntos) if (suma / 3 < umbral) tinta++;
-  const densidad = puntos.length ? tinta / puntos.length : 0;
+  let pArriba = Math.max(0, Math.min(dentroY0, arriba));
+  while (pArriba > 0 && filaSucia(pArriba - 1)) pArriba--;
+  let pAbajo = Math.min(al - 1, Math.max(dentroY1, abajo));
+  while (pAbajo < al - 1 && filaSucia(pAbajo + 1)) pAbajo++;
+
+  let parche = null;
+  if (limpias.length >= 2) {
+    const alturaParche = pAbajo - pArriba + 1;
+    const datos = new Uint8Array(an * alturaParche * 3);
+    // Cada fila del parche se mezcla entre la fila limpia más cercana por
+    // arriba y la más cercana por abajo, según lo lejos que esté de cada una.
+    // Copiar siempre la misma fila deja una costura horizontal muy visible.
+    const arribaLimpia = limpias.filter((y) => y < pArriba);
+    const abajoLimpia = limpias.filter((y) => y > pAbajo);
+    const fA = arribaLimpia.length ? arribaLimpia[arribaLimpia.length - 1] : (abajoLimpia[0] || 0);
+    const fB = abajoLimpia.length ? abajoLimpia[0] : fA;
+    for (let y = 0; y < alturaParche; y++) {
+      const t = fB === fA ? 0 : (y + pArriba - fA) / (fB - fA);
+      const w = Math.max(0, Math.min(1, t));
+      for (let x = 0; x < an; x++) {
+        const d = (y * an + x) * 3, a3 = (fA * an + x) * 3, b3 = (fB * an + x) * 3;
+        datos[d] = rgb[a3] * (1 - w) + rgb[b3] * w;
+        datos[d + 1] = rgb[a3 + 1] * (1 - w) + rgb[b3 + 1] * w;
+        datos[d + 2] = rgb[a3 + 2] * (1 - w) + rgb[b3 + 2] * w;
+      }
+    }
+    parche = {
+      an, al: alturaParche, datos,
+      x: x0 / A, y: (y0 + pArriba) / A,
+      ancho: an / A, alto: alturaParche / A,
+    };
+  }
 
   return {
-    papel: mediana(papel) || [1, 1, 1],
-    tinta: media(oscuros.map((o) => o[1])) || [0, 0, 0],
-    negrita: densidad > 0.17,
-    densidad,
+    parche,
+    suavidad,
+    papel: claros.length ? mediaDe(claros) : [1, 1, 1],
+    tinta: mediaDe(nucleo),
+    // un trazo de más del 11,5 % de la altura de la letra es negrita: en
+    // Helvetica el palo normal ronda el 9 % y el de la negrita el 14 %
+    negrita: grosor / A / Math.max(0.5, altoTinta) > 0.115,
+    altoTinta,
+    arriba: (y0 + arriba) / A,        // en puntos, desde arriba de la hoja
+    abajo: (y0 + abajo) / A,
+    izquierda: (x0 + izq) / A,
+    ancho: (der - izq + 1) / A,
   };
 }
 
@@ -567,6 +683,120 @@ function envolverContenido(objPag) {
   objPag.put('GrapaEnvuelto', doc.newBoolean(true));
 }
 
+/* Los parches de papel LIMPIO de esta sesión, por si se vuelve a corregir
+   el mismo renglón: si no, la segunda medición leería nuestro propio texto. */
+const parchesPapel = new Map();
+
+/**
+ * Compone el renglón corregido como imagen: el papel de verdad de fondo y el
+ * texto encima, con la misma blandura de borde que tiene el escaneo.
+ *
+ * Es lo que hace que no cante. El texto vectorial tiene el borde limpio y el
+ * escaneado lo tiene blando; puestos uno al lado del otro, la diferencia se
+ * nota aunque el tamaño, el color y la tipografía sean los mismos.
+ */
+function componerParche(parche, fila, suavidad) {
+  const A = AUMENTO_MEDIDA;
+  const lienzo = document.createElement('canvas');
+  lienzo.width = parche.an; lienzo.height = parche.al;
+  const ctx = lienzo.getContext('2d', { willReadFrequently: true });
+
+  const fondo = ctx.createImageData(parche.an, parche.al);
+  for (let i = 0, j = 0; i < parche.datos.length; i += 3, j += 4) {
+    fondo.data[j] = parche.datos[i];
+    fondo.data[j + 1] = parche.datos[i + 1];
+    fondo.data[j + 2] = parche.datos[i + 2];
+    fondo.data[j + 3] = 255;
+  }
+  ctx.putImageData(fondo, 0, 0);
+
+  const tam = (fila.tam || 10) * A;
+  ctx.font = (fila.negrita ? 'bold ' : '') + tam.toFixed(2) + 'px Helvetica, Arial, sans-serif';
+  const [r, g, b] = fila.tinta || [0, 0, 0];
+  ctx.fillStyle = 'rgb(' + Math.round(r * 255) + ',' + Math.round(g * 255) + ',' + Math.round(b * 255) + ')';
+  ctx.textBaseline = 'alphabetic';
+  ctx.filter = 'blur(' + Math.min(3, Math.max(0.2, suavidad * 0.5)).toFixed(2) + 'px)';
+
+  const x = (fila.x - parche.x) * A;
+  const y = (fila.base - parche.y) * A;
+  const natural = ctx.measureText(fila.t).width;
+  const hueco = (fila.hueco || parche.ancho) * A;
+  ctx.save();
+  if (natural > hueco && natural > 0) {
+    ctx.translate(x, 0);
+    ctx.scale(Math.max(0.55, hueco / natural), 1);
+    ctx.fillText(fila.t, 0, y);
+  } else {
+    ctx.fillText(fila.t, x, y);
+  }
+  ctx.restore();
+  ctx.filter = 'none';
+
+  const fuera = ctx.getImageData(0, 0, parche.an, parche.al).data;
+  const datos = new Uint8Array(parche.an * parche.al * 3);
+  for (let i = 0, j = 0; j < fuera.length; i += 3, j += 4) {
+    datos[i] = fuera[j]; datos[i + 1] = fuera[j + 1]; datos[i + 2] = fuera[j + 2];
+  }
+  return Object.assign({}, parche, { datos });
+}
+
+/** Lo oscuro que ha quedado el corazón del trazo, de 0 a 255. */
+function nucleoDe(datos) {
+  const l = [];
+  for (let i = 0; i < datos.length; i += 3) l.push((datos[i] + datos[i + 1] + datos[i + 2]) / 3);
+  l.sort((a, b) => a - b);
+  const n = Math.max(1, Math.round(l.length * 0.02));
+  let s = 0;
+  for (let i = 0; i < n; i++) s += l[i];
+  return s / n;
+}
+
+/**
+ * Desenfocar el texto para que iguale al escaneo lo aclara: la tinta se
+ * reparte y el corazón del trazo pierde fuerza. Así que se compone, se mide
+ * lo que ha salido y se vuelve a componer con la tinta corregida, hasta que
+ * el negro del trazo es el mismo que el del renglón que sustituye.
+ */
+function componerAjustado(parche, fila, suavidad) {
+  const objetivo = ((fila.tinta || [0, 0, 0]).reduce((a, b) => a + b, 0) / 3) * 255;
+  const papel = ((fila.papel || [1, 1, 1]).reduce((a, b) => a + b, 0) / 3) * 255;
+  let tinta = (fila.tinta || [0, 0, 0]).slice();
+  let mejor = null;
+  for (let intento = 0; intento < 4; intento++) {
+    const salida = componerParche(parche, Object.assign({}, fila, { tinta }), suavidad);
+    const logrado = nucleoDe(salida.datos);
+    if (!mejor || Math.abs(logrado - objetivo) < mejor.error) {
+      mejor = { salida, error: Math.abs(logrado - objetivo) };
+    }
+    if (Math.abs(logrado - objetivo) <= 3) break;
+    const quiero = Math.max(1, papel - objetivo), tengo = Math.max(1, papel - logrado);
+    const factor = Math.min(3, Math.max(0.3, quiero / tengo));
+    tinta = tinta.map((c) => Math.max(0, Math.min(1, (papel / 255) - ((papel / 255) - c) * factor)));
+  }
+  return mejor.salida;
+}
+
+/** Mete el parche de papel en la hoja como una imagen, con nombre propio. */
+function incrustarParche(pagina, nombre, p) {
+  const px = new Pixmap(ColorSpace.DeviceRGB, [0, 0, p.an, p.al], false);
+  const destino = px.getPixels();
+  const salto = px.getStride();
+  for (let y = 0; y < p.al; y++) {
+    for (let x = 0; x < p.an; x++) {
+      const d = y * salto + x * 3, o = (y * p.an + x) * 3;
+      destino[d] = p.datos[o]; destino[d + 1] = p.datos[o + 1]; destino[d + 2] = p.datos[o + 2];
+    }
+  }
+  const ref = doc.addImage(new Image(px));
+  px.destroy();
+  const objPag = pagina.getObject();
+  let rec = objPag.get('Resources');
+  if (!rec.isDictionary()) { rec = doc.addObject(doc.newDictionary()); objPag.put('Resources', rec); }
+  let xo = rec.get('XObject');
+  if (!xo.isDictionary()) { xo = doc.addObject(doc.newDictionary()); rec.put('XObject', xo); }
+  xo.put(nombre, ref);
+}
+
 function aplicarCapa(pagina, modelo, marco) {
   const objPag = pagina.getObject();
   const clave = 'GrapaTxt', claveN = 'GrapaTxtN';
@@ -586,27 +816,42 @@ function aplicarCapa(pagina, modelo, marco) {
     const ancho = r.x1 - r.x0, alto = r.y1 - r.y0;
     if (ancho <= 0.5 || alto <= 0.5 || !r.t) continue;
     const met = metricaDe(r.t);
-    const tam = alto / Math.max(0.3, met.alto);
+    const tam = r.editado && r.tam ? r.tam : alto / Math.max(0.3, met.alto);
     const cual = r.editado && r.negrita ? negrita : normal;
     const natural = medirAncho(cual, r.t, tam);
+    const hueco = (r.editado && r.hueco) || ancho;
     // el renglón corregido se encoge si no cabe, pero NO se estira: estirarlo
     // para rellenar el hueco del texto viejo deja las letras separadas y canta
     const tz = natural <= 0.01 ? 100
-      : r.editado ? Math.max(55, Math.min(100, (ancho / natural) * 100))
+      : r.editado ? Math.max(55, Math.min(100, (hueco / natural) * 100))
       : Math.max(5, Math.min(900, (ancho / natural) * 100));
-    const x = r.x0 + marco.x0;
+    const x = (r.editado && r.x != null ? r.x : r.x0) + marco.x0;
 
     if (r.editado) {
-      // tapar la foto con el color de su propio papel, y escribir encima
-      const m = Math.max(0.8, alto * 0.16);
-      const [pr, pg, pb] = r.papel || [1, 1, 1];
+      // Tapar: con un trozo de papel de verdad, sacado de las filas limpias
+      // de al lado, si se pudo sacar; con su color liso si no.
       const [tr, tg, tb] = r.tinta || [0, 0, 0];
-      buf.writeLine('q ' + pr.toFixed(4) + ' ' + pg.toFixed(4) + ' ' + pb.toFixed(4) + ' rg '
-        + (x - m).toFixed(2) + ' ' + (marco.y1 - r.y1 - m).toFixed(2) + ' '
-        + (ancho + m * 2).toFixed(2) + ' ' + (alto + m * 2).toFixed(2) + ' re f Q');
-      buf.writeLine('q BT /' + (r.negrita ? claveN : clave) + ' ' + tam.toFixed(2) + ' Tf ' + tz.toFixed(2) + ' Tz '
+      if (r.parche && r.parcheCaja) {
+        const [px0, py0, pan, pal] = r.parcheCaja;
+        buf.writeLine('q ' + pan.toFixed(2) + ' 0 0 ' + pal.toFixed(2) + ' '
+          + (px0 + marco.x0).toFixed(2) + ' ' + (marco.y1 - py0 - pal).toFixed(2)
+          + ' cm /' + r.parche + ' Do Q');
+      } else {
+        const m = Math.max(0.8, alto * 0.16);
+        const [pr, pg, pb] = r.papel || [1, 1, 1];
+        buf.writeLine('q ' + pr.toFixed(4) + ' ' + pg.toFixed(4) + ' ' + pb.toFixed(4) + ' rg '
+          + (x - m).toFixed(2) + ' ' + (marco.y1 - r.y1 - m).toFixed(2) + ' '
+          + (ancho + m * 2).toFixed(2) + ' ' + (alto + m * 2).toFixed(2) + ' re f Q');
+      }
+      // Si el renglón va dentro de la imagen, aquí solo se escribe el texto
+      // INVISIBLE, para poder buscarlo y copiarlo. Si no hubo parche, se
+      // escribe a la vista, que es el respaldo.
+      const modo = r.parche && r.parcheCaja ? '3 Tr ' : '';
+      buf.writeLine('q BT ' + modo + '/' + (r.negrita ? claveN : clave) + ' ' + tam.toFixed(2)
+        + ' Tf ' + tz.toFixed(2) + ' Tz '
         + tr.toFixed(4) + ' ' + tg.toFixed(4) + ' ' + tb.toFixed(4) + ' rg 1 0 0 1 '
-        + x.toFixed(2) + ' ' + (marco.y1 - r.y1 + met.abajo * tam).toFixed(2) + ' Tm ('
+        + x.toFixed(2) + ' '
+        + (marco.y1 - (r.base != null ? r.base : r.y1 - met.abajo * tam)).toFixed(2) + ' Tm ('
         + escapar(r.t) + ') Tj ET Q');
     } else {
       buf.writeLine('q BT 3 Tr /' + clave + ' ' + tam.toFixed(2) + ' Tf ' + tz.toFixed(2)
@@ -689,12 +934,33 @@ function reescribirEnEscaneo(indice, textoNuevo) {
   if (!fila) return { ok: false, motivo: 'No encuentro el reconocimiento de esta hoja; vuelve a reconocerla.' };
 
   const antes = fila.t, eraEditado = !!fila.editado;
-  const colores = coloresDe(pagina, [fila.x0, fila.y0, fila.x1, fila.y1]);
+
+  // Se mide el renglón ORIGINAL y se copian sus rasgos. El tamaño y la línea
+  // base se deducen de lo que ocupa la tinta de verdad, no del recuadro que
+  // da el reconocimiento, que es algo más alto y dejaba la letra crecida.
+  const med = eraEditado ? null : medirRenglon(pagina, [fila.x0, fila.y0, fila.x1, fila.y1]);
+  if (med) {
+    const metOrig = metricaDe(antes);
+    fila.papel = med.papel;
+    fila.tinta = med.tinta;
+    fila.negrita = med.negrita;
+    fila.tam = med.altoTinta / Math.max(0.3, metOrig.alto);
+    fila.base = med.abajo - metOrig.abajo * fila.tam;
+    fila.x = med.izquierda;
+    fila.hueco = Math.max(med.ancho, fila.x1 - fila.x0);
+    fila.suavidad = med.suavidad;
+    if (med.parche) parchesPapel.set(paginaActual + ':' + r.enModelo, { p: med.parche, s: med.suavidad });
+  }
+  const guardado = parchesPapel.get(paginaActual + ':' + r.enModelo);
   fila.t = textoNuevo;
   fila.editado = true;
-  fila.papel = colores.papel;
-  fila.tinta = colores.tinta;
-  fila.negrita = colores.negrita;
+
+  if (guardado) {
+    const nombre = 'GrapaParche' + r.enModelo;
+    incrustarParche(pagina, nombre, componerAjustado(guardado.p, fila, guardado.s));
+    fila.parche = nombre;
+    fila.parcheCaja = [guardado.p.x, guardado.p.y, guardado.p.ancho, guardado.p.alto];
+  }
 
   const salida = aplicarCapa(pagina, modelo, marco);
   const volver = (motivo) => {
