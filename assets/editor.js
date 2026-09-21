@@ -66,10 +66,7 @@ function marcoDe(pagina) {
    buscar y copiar, pero no corregir: la foto seguiría diciendo lo de
    antes, y el documento mostraría una cosa y copiaría otra. */
 function llevaOCR(pagina) {
-  try {
-    const m = pagina.getObject().get('GrapaOCR');
-    return !!(m && m.asBoolean && m.asBoolean());
-  } catch (e) { return false; }
+  return !!modeloDe(pagina);
 }
 
 /* ---------- leer los renglones de una hoja ---------- */
@@ -266,16 +263,26 @@ function dibujar() {
   ctx.putImageData(aImageData(pix, an, al), 0, 0);
   pix.destroy();
 
-  renglones = leerRenglones(pagina);
-  pintarRenglones();
+  const modelo = modeloDe(pagina);
+  renglones = modelo
+    ? modelo.renglones.map((r, i) => ({
+        texto: r.t, bbox: [r.x0, r.y0, r.x1, r.y1],
+        x: r.x0, y: r.y1, size: r.y1 - r.y0,
+        color: r.tinta || [0, 0, 0], uniforme: true,
+        deEscaneo: true, enModelo: i,
+      })).filter((r) => r.texto)
+    : leerRenglones(pagina);
 
   // Una hoja puede estar de tres maneras: con texto de verdad (se corrige),
   // escaneada y muda (se puede reconocer), o escaneada y ya reconocida (se
   // busca y se copia, pero no se corrige: la foto seguiría diciendo lo de
   // antes y el documento mostraría una cosa y copiaría otra).
-  const conOCR = llevaOCR(pagina);
+  // en una hoja reconocida los renglones SÍ se pueden corregir: al hacerlo se
+  // tapa la zona y se reescribe encima, de modo que la foto y el texto van
+  // siempre a la vez y no pueden acabar diciendo cosas distintas
+  const conOCR = !!modelo;
   const esEscaneo = renglones.length === 0 && !conOCR;
-  if (conOCR) { renglones = []; capaRenglones(); }
+  pintarRenglones();
   $('#cartelEscaneo').hidden = !esEscaneo;
   $('#hojaEnvoltura').hidden = esEscaneo;
   pintarReconocido(conOCR);
@@ -340,9 +347,11 @@ function editar(indice) {
 
   const ayuda = document.createElement('div');
   ayuda.className = 'campo-ayuda';
-  ayuda.textContent = r.uniforme
-    ? 'Enter para aplicar · Esc para dejarlo como está'
-    : 'Cuidado: este renglón mezcla tipografías o tamaños';
+  ayuda.textContent = r.deEscaneo
+    ? 'Se tapará la zona y se escribirá encima · Enter para aplicar · Esc para dejarlo'
+    : r.uniforme
+      ? 'Enter para aplicar · Esc para dejarlo como está'
+      : 'Cuidado: este renglón mezcla tipografías o tamaños';
   ayuda.style.left = (r.bbox[0] * escala - 3) + 'px';
   ayuda.style.top = (r.bbox[3] * escala + 6) + 'px';
 
@@ -357,6 +366,68 @@ function editar(indice) {
   campoAbierto = campo;
   campo.focus();
   campo.select();
+}
+
+/* ---------- de qué color son el papel y la tinta ----------
+   Para corregir un renglón de un escaneo hay que taparlo, y taparlo de
+   blanco sobre un papel grisáceo o sobre una celda de tabla canta. Así que
+   se mira el papel de alrededor del renglón, y la tinta de dentro. */
+function coloresDe(pagina, caja) {
+  const pix = pagina.toPixmap(Matrix.scale(1, 1), ColorSpace.DeviceRGB, false, true);
+  const an = pix.getWidth(), al = pix.getHeight();
+  const n = pix.getNumberOfComponents(), salto = pix.getStride();
+  const px = new Uint8Array(pix.getPixels());   // copia: es una ventana a la memoria del motor
+  pix.destroy();
+
+  const dentro = (x, y) => x >= 0 && y >= 0 && x < an && y < al;
+  const leer = (x, y) => { const o = y * salto + x * n; return [px[o], px[o + 1], px[o + 2]]; };
+
+  const x0 = Math.max(0, Math.floor(caja[0])), x1 = Math.min(an - 1, Math.ceil(caja[2]));
+  const y0 = Math.max(0, Math.floor(caja[1])), y1 = Math.min(al - 1, Math.ceil(caja[3]));
+
+  // papel: una banda justo encima y otra justo debajo del renglón
+  const papel = [];
+  for (const y of [y0 - 3, y0 - 2, y1 + 2, y1 + 3]) {
+    if (!dentro(x0, y)) continue;
+    for (let x = x0; x <= x1; x += 2) if (dentro(x, y)) papel.push(leer(x, y));
+  }
+  // tinta: lo más oscuro de dentro del renglón
+  const puntos = [];
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+    if (!dentro(x, y)) continue;
+    const c = leer(x, y);
+    puntos.push([c[0] + c[1] + c[2], c]);
+  }
+  puntos.sort((a, b) => a[0] - b[0]);
+  const oscuros = puntos.slice(0, Math.max(1, Math.round(puntos.length * 0.15)));
+
+  const media = (lista) => {
+    if (!lista.length) return null;
+    const s3 = [0, 0, 0];
+    for (const c of lista) { s3[0] += c[0]; s3[1] += c[1]; s3[2] += c[2]; }
+    return s3.map((v) => v / lista.length / 255);
+  };
+  const mediana = (lista) => {
+    if (!lista.length) return null;
+    return [0, 1, 2].map((i) => {
+      const v = lista.map((c) => c[i]).sort((a, b) => a - b);
+      return v[Math.floor(v.length / 2)] / 255;
+    });
+  };
+  // Cuánta tinta hay en el renglón: un renglón en negrita ennegrece bastante
+  // más superficie que uno normal del mismo tamaño. No es infalible, pero
+  // acierta en un documento corriente y no estropea nada si falla.
+  const umbral = 140;
+  let tinta = 0;
+  for (const [suma] of puntos) if (suma / 3 < umbral) tinta++;
+  const densidad = puntos.length ? tinta / puntos.length : 0;
+
+  return {
+    papel: mediana(papel) || [1, 1, 1],
+    tinta: media(oscuros.map((o) => o[1])) || [0, 0, 0],
+    negrita: densidad > 0.17,
+    densidad,
+  };
 }
 
 /* ---------- reconocer el texto de una hoja escaneada ----------
@@ -392,7 +463,7 @@ async function reconocerHoja() {
     });
     const ms = Math.round(performance.now() - t0);
 
-    if (!salida.palabras.length) {
+    if (!salida.renglones.length) {
       cargando(false);
       avisar('No se reconoció ninguna palabra en esta hoja.', 'mal');
       return;
@@ -400,7 +471,14 @@ async function reconocerHoja() {
 
     const respaldo = bytesActuales;
     cargando(true, 'Poniendo el texto encima de la foto…');
-    const bytes = escribirCapaOCR(pagina, salida.palabras, escala, marco);
+    const modelo = {
+      v: 1,
+      renglones: salida.renglones.map((w) => ({
+        t: w.texto,
+        x0: w.x0 / escala, y0: w.y0 / escala, x1: w.x1 / escala, y1: w.y1 / escala,
+      })),
+    };
+    const bytes = aplicarCapa(pagina, modelo, marco);
     if (!bytes) { abrirBytes(respaldo, nombre); cargando(false); avisar('No se pudo escribir el texto.', 'mal'); return; }
 
     pila.push({ bytes: respaldo, cambios: cambios.slice() });
@@ -409,11 +487,12 @@ async function reconocerHoja() {
     abrirBytes(bytes, nombre);
     reconocidos.set(paginaActual, {
       texto: salida.texto, confianza: Math.round(salida.confianza),
-      palabras: salida.palabras.length, ms,
+      palabras: salida.palabras, renglones: salida.renglones.length, ms,
     });
     cargando(false);
     dibujar();
-    avisar(`Reconocidas ${salida.palabras.length} palabras (${Math.round(salida.confianza)} % de confianza) en ${(ms / 1000).toFixed(1)} s.`, 'bien');
+    avisar(`Reconocidos ${salida.renglones.length} renglones, ${salida.palabras} palabras `
+      + `(${Math.round(salida.confianza)} % de confianza) en ${(ms / 1000).toFixed(1)} s.`, 'bien');
   } catch (e) {
     console.error(e);
     cargando(false);
@@ -421,44 +500,136 @@ async function reconocerHoja() {
   }
 }
 
-function escribirCapaOCR(pagina, palabras, escala, marco) {
-  const fuente = new Font('Helvetica');
-  const clave = 'GrapaOCR';
-  const refFuente = doc.addSimpleFont(fuente, 'Latin');
+/* ---------- la capa de Grapa sobre una hoja escaneada ----------
+
+   Todo lo que Grapa pone encima de la foto vive en UN solo flujo, que se
+   reescribe entero en cada cambio, y en un modelo guardado dentro de la
+   propia hoja. Así:
+
+     · nunca hace falta redactar. Redactar obliga a MuPDF a reescribir el
+       contenido de la hoja, y en un PDF impreso por Chrome —que lo dibuja
+       todo bajo una matriz de 0,24— eso metía nuestro texto dentro de esa
+       matriz: acababa a un cuarto de tamaño y en otro sitio;
+     · el modelo viaja dentro del archivo, así que la hoja se puede seguir
+       corrigiendo después de guardarla, cerrarla o pasarla por Grapa;
+     · los renglones sin tocar siguen invisibles —solo para buscar— y los
+       corregidos se ven, porque se tapa su zona y se escribe encima.     */
+
+const CLAVE_MODELO = 'GrapaOCR';
+const CLAVE_CAPA = 'GrapaCapa';
+
+/**
+ * De qué tamaño hay que escribir para que ocupe lo mismo que ocupaba.
+ *
+ * El recuadro que da el reconocimiento ciñe lo que hay dibujado, y eso
+ * depende del texto: «DISTRIBUIDORA SRL», todo mayúsculas y sin colas, solo
+ * llega a la altura de las mayúsculas; «Página» baja hasta la cola de la g.
+ * Tomar la altura del recuadro como altura de la letra deja el renglón
+ * corregido visiblemente más pequeño que el que sustituye.
+ */
+function metricaDe(texto) {
+  const t = String(texto || '');
+  const conCola = /[gjpqyGJPQY¡¿(),;_]/.test(t);
+  const conAlta = /[A-ZÁÉÍÓÚÜÑbdfhklt0-9ÀÂÄÈÊËÎÏÔÖÛ]/.test(t);
+  const arriba = conAlta ? 0.72 : 0.52;    // altura de mayúscula o de la x
+  const abajo = conCola ? 0.21 : 0;        // lo que baja de la línea base
+  return { arriba, abajo, alto: arriba + abajo };
+}
+
+function modeloDe(pagina) {
+  try {
+    const m = pagina.getObject().get(CLAVE_MODELO);
+    if (!m || !m.isString || !m.isString()) return null;
+    const d = JSON.parse(m.asString());
+    return d && Array.isArray(d.renglones) ? d : null;
+  } catch (e) { return null; }
+}
+
+/**
+ * El contenido de una hoja son varios flujos que se concatenan como si
+ * fueran uno solo. Si lo que ya había deja la matriz cambiada —Chrome, al
+ * imprimir a PDF, abre con «.24 0 0 -.24 0 842.88 cm» y no la cierra—, todo
+ * lo que añadamos detrás hereda esa matriz y acaba a un cuarto de tamaño y
+ * en otro sitio. Se envuelve lo anterior en q…Q, que es la manera que
+ * manda el propio formato, y nuestra capa empieza por Q.
+ */
+function envolverContenido(objPag) {
+  if (objPag.get('GrapaEnvuelto').isBoolean && objPag.get('GrapaEnvuelto').isBoolean()) return;
+  const abre = new Buffer();
+  abre.writeLine('q');
+  const refAbre = doc.addStream(abre, {});
+  const cont = objPag.get('Contents');
+  const arr = doc.newArray();
+  arr.push(refAbre);
+  if (cont.isArray()) { for (let i = 0; i < cont.length; i++) arr.push(cont.get(i)); }
+  else arr.push(cont);
+  objPag.put('Contents', arr);
+  objPag.put('GrapaEnvuelto', doc.newBoolean(true));
+}
+
+function aplicarCapa(pagina, modelo, marco) {
   const objPag = pagina.getObject();
+  const clave = 'GrapaTxt', claveN = 'GrapaTxtN';
   let rec = objPag.get('Resources');
   if (!rec.isDictionary()) { rec = doc.addObject(doc.newDictionary()); objPag.put('Resources', rec); }
   let fuentes = rec.get('Font');
   if (!fuentes.isDictionary()) { fuentes = doc.addObject(doc.newDictionary()); rec.put('Font', fuentes); }
-  fuentes.put(clave, refFuente);
+  fuentes.put(clave, doc.addSimpleFont(new Font('Helvetica'), 'Latin'));
+  fuentes.put(claveN, doc.addSimpleFont(new Font('Helvetica-Bold'), 'Latin'));
+
+  envolverContenido(objPag);
 
   const buf = new Buffer();
-  let puestas = 0;
-  for (const w of palabras) {
-    const ancho = (w.x1 - w.x0) / escala;
-    const alto = (w.y1 - w.y0) / escala;
-    if (ancho <= 0.5 || alto <= 0.5) continue;
-    const tam = alto;
-    const natural = medirAncho(fuente, w.texto, tam);
-    // se estira o encoge cada palabra para que su recuadro coincida con el
-    // de la foto: así lo que se selecciona es lo que se ve
-    const tz = natural > 0.01 ? Math.max(5, Math.min(900, (ancho / natural) * 100)) : 100;
-    const x = w.x0 / escala + marco.x0;
-    const y = marco.y1 - w.y1 / escala;
-    buf.writeLine('q BT 3 Tr /' + clave + ' ' + tam.toFixed(2) + ' Tf ' + tz.toFixed(2)
-      + ' Tz 1 0 0 1 ' + x.toFixed(2) + ' ' + y.toFixed(2) + ' Tm ('
-      + escapar(w.texto) + ') Tj ET Q');
-    puestas++;
-  }
-  if (!puestas) return null;
+  buf.writeLine('Q');          // cierra el q que envuelve lo anterior
+  const normal = new Font('Helvetica'), negrita = new Font('Helvetica-Bold');
+  for (const r of modelo.renglones) {
+    const ancho = r.x1 - r.x0, alto = r.y1 - r.y0;
+    if (ancho <= 0.5 || alto <= 0.5 || !r.t) continue;
+    const met = metricaDe(r.t);
+    const tam = alto / Math.max(0.3, met.alto);
+    const cual = r.editado && r.negrita ? negrita : normal;
+    const natural = medirAncho(cual, r.t, tam);
+    // el renglón corregido se encoge si no cabe, pero NO se estira: estirarlo
+    // para rellenar el hueco del texto viejo deja las letras separadas y canta
+    const tz = natural <= 0.01 ? 100
+      : r.editado ? Math.max(55, Math.min(100, (ancho / natural) * 100))
+      : Math.max(5, Math.min(900, (ancho / natural) * 100));
+    const x = r.x0 + marco.x0;
 
-  const refFlujo = doc.addStream(buf, {});
-  let cont = objPag.get('Contents');
-  if (cont.isArray()) { cont.push(refFlujo); }
-  else { const arr = doc.newArray(); arr.push(cont); arr.push(refFlujo); objPag.put('Contents', arr); }
-  objPag.put('GrapaOCR', doc.newBoolean(true));   // la marca, para reconocerlo después
+    if (r.editado) {
+      // tapar la foto con el color de su propio papel, y escribir encima
+      const m = Math.max(0.8, alto * 0.16);
+      const [pr, pg, pb] = r.papel || [1, 1, 1];
+      const [tr, tg, tb] = r.tinta || [0, 0, 0];
+      buf.writeLine('q ' + pr.toFixed(4) + ' ' + pg.toFixed(4) + ' ' + pb.toFixed(4) + ' rg '
+        + (x - m).toFixed(2) + ' ' + (marco.y1 - r.y1 - m).toFixed(2) + ' '
+        + (ancho + m * 2).toFixed(2) + ' ' + (alto + m * 2).toFixed(2) + ' re f Q');
+      buf.writeLine('q BT /' + (r.negrita ? claveN : clave) + ' ' + tam.toFixed(2) + ' Tf ' + tz.toFixed(2) + ' Tz '
+        + tr.toFixed(4) + ' ' + tg.toFixed(4) + ' ' + tb.toFixed(4) + ' rg 1 0 0 1 '
+        + x.toFixed(2) + ' ' + (marco.y1 - r.y1 + met.abajo * tam).toFixed(2) + ' Tm ('
+        + escapar(r.t) + ') Tj ET Q');
+    } else {
+      buf.writeLine('q BT 3 Tr /' + clave + ' ' + tam.toFixed(2) + ' Tf ' + tz.toFixed(2)
+        + ' Tz 1 0 0 1 ' + x.toFixed(2) + ' ' + (marco.y1 - r.y1 + met.abajo * tam).toFixed(2)
+        + ' Tm (' + escapar(r.t) + ') Tj ET Q');
+    }
+  }
+
+  // un solo flujo, reescrito entero: si ya existe, se sustituye
+  let capa = objPag.get(CLAVE_CAPA);
+  if (capa && capa.isStream && capa.isStream()) {
+    capa.writeStream(buf);
+  } else {
+    capa = doc.addStream(buf, {});
+    objPag.put(CLAVE_CAPA, capa);
+    let cont = objPag.get('Contents');
+    if (cont.isArray()) { cont.push(capa); }
+    else { const arr = doc.newArray(); arr.push(cont); arr.push(capa); objPag.put('Contents', arr); }
+  }
+  objPag.put(CLAVE_MODELO, doc.newString(JSON.stringify(modelo)));
   return bytesDe(doc);
 }
+
 
 /* ---------- el cambio de verdad ---------- */
 function aplicar(indice, textoNuevo) {
@@ -471,7 +642,9 @@ function aplicar(indice, textoNuevo) {
 
   setTimeout(() => {
     try {
-      const resultado = reescribir(indice, textoNuevo);
+      const resultado = renglones[indice].deEscaneo
+        ? reescribirEnEscaneo(indice, textoNuevo)
+        : reescribir(indice, textoNuevo);
       if (!resultado.ok) {
         abrirBytes(respaldo, nombre);          // volver atrás
         cargando(false);
@@ -483,14 +656,14 @@ function aplicar(indice, textoNuevo) {
       cambios.push({
         hoja: paginaActual, antes: r.texto, despues: textoNuevo,
         encogido: resultado.encogido, tipografia: resultado.tipografia,
+        sobreFoto: resultado.sobreFoto,
       });
       $('#btnDeshacer').disabled = false;
       cargando(false);
       pintarCambios();
       dibujar();
-      avisar(resultado.encogido
-        ? `Cambiado, y ajustado al ancho original (${resultado.encogido} %).`
-        : 'Cambiado.', 'bien');
+      avisar((resultado.sobreFoto ? 'Cambiado sobre la foto' : 'Cambiado')
+        + (resultado.encogido ? `, ajustado al ancho original (${resultado.encogido} %)` : '') + '.', 'bien');
     } catch (e) {
       abrirBytes(respaldo, nombre);
       cargando(false);
@@ -499,6 +672,46 @@ function aplicar(indice, textoNuevo) {
     }
   }, 20);
 }
+
+/* ---------- corregir un renglón de una hoja escaneada ----------
+   Se cambia el modelo y se vuelve a escribir la capa entera. No se redacta
+   nada y no se toca la foto original: lo que tapa es un recuadro nuestro,
+   del color del papel de ese renglón. */
+function reescribirEnEscaneo(indice, textoNuevo) {
+  const r = renglones[indice];
+  const pagina = doc.loadPage(paginaActual);
+  const marco = marcoDe(pagina);
+  if (marco.giro !== 0) {
+    return { ok: false, motivo: 'Esta hoja está girada ' + marco.giro + '°; el editor todavía no escribe sobre hojas giradas.' };
+  }
+  const modelo = modeloDe(pagina);
+  const fila = modelo && modelo.renglones[r.enModelo];
+  if (!fila) return { ok: false, motivo: 'No encuentro el reconocimiento de esta hoja; vuelve a reconocerla.' };
+
+  const antes = fila.t, eraEditado = !!fila.editado;
+  const colores = coloresDe(pagina, [fila.x0, fila.y0, fila.x1, fila.y1]);
+  fila.t = textoNuevo;
+  fila.editado = true;
+  fila.papel = colores.papel;
+  fila.tinta = colores.tinta;
+  fila.negrita = colores.negrita;
+
+  const salida = aplicarCapa(pagina, modelo, marco);
+  const volver = (motivo) => {
+    fila.t = antes; fila.editado = eraEditado;
+    return { ok: false, motivo };
+  };
+
+  const comprobar = PDFDocument.openDocument(salida, 'application/pdf');
+  const texto = comprobar.loadPage(paginaActual).toStructuredText('preserve-whitespace').asText();
+  if (!texto.includes(textoNuevo.trim())) return volver('El texto nuevo no quedó donde debía; no se cambió nada.');
+  if (antes.trim() && texto.includes(antes.trim())) return volver('El texto viejo seguía ahí; no se cambió nada.');
+
+  bytesActuales = salida;
+  abrirBytes(salida, nombre);
+  return { ok: true, sobreFoto: true };
+}
+
 
 function reescribir(indice, textoNuevo) {
   const r = renglones[indice];
@@ -588,6 +801,7 @@ function pintarCambios() {
     donde.className = 'donde';
     donde.textContent = 'Hoja ' + (c.hoja + 1)
       + (c.encogido ? ' · ajustado al ' + c.encogido + ' %' : '')
+      + (c.sobreFoto ? ' · sobre la foto' : '')
       + (c.tipografia ? ' · escrito en ' + c.tipografia : '');
     const a = document.createElement('div'); a.className = 'antes'; a.textContent = c.antes;
     const b = document.createElement('div'); b.className = 'despues'; b.textContent = c.despues;
@@ -601,11 +815,11 @@ function pintarReconocido(conOCR) {
   const r = reconocidos.get(paginaActual);
   caja.hidden = !conOCR;
   if (!conOCR) return;
-  $('#reconocidoResumen').textContent = r
-    ? `${r.palabras} palabras · ${r.confianza} % de confianza · ${(r.ms / 1000).toFixed(1)} s. `
-      + 'Ya se puede buscar y copiar en el PDF. No se corrige: la foto seguiría diciendo lo de antes.'
-    : 'Esta hoja ya lleva texto reconocido: se puede buscar y copiar, pero no corregir, '
-      + 'porque la foto seguiría diciendo lo de antes.';
+  $('#reconocidoResumen').textContent = (r
+    ? `${r.renglones} renglones · ${r.palabras} palabras · ${r.confianza} % de confianza · ${(r.ms / 1000).toFixed(1)} s. `
+    : 'Esta hoja ya lleva texto reconocido. ')
+    + 'Ya se puede buscar y copiar. Y se puede corregir: al hacerlo se tapa la zona '
+    + 'con el color del papel y se escribe encima, así que la foto cambia también.';
   $('#reconocidoTexto').value = r ? r.texto.trim() : '(reconocido en otro momento)';
   $('#reconocidoTexto').hidden = !r;
   $('#btnCopiarTexto').hidden = !r;

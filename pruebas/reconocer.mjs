@@ -39,11 +39,13 @@ ok('reconoció el nombre del postor', /COMERCIAL SAN JOSE/i.test(texto));
 ok('reconoció el importe', /12[.,]450/.test(texto));
 ok('reconoció el expediente', /10488/.test(texto));
 
-console.log('\n--- no se vuelve editable ---');
-ok('no hay renglones que pulsar', (await pag.locator('.renglon').count()) === 0);
+console.log('\n--- y queda lista para corregir ---');
+ok('los renglones se pueden pulsar', (await pag.locator('.renglon').count()) > 5,
+   await pag.locator('.renglon').count());
 ok('el cartel de escaneo desaparece', await pag.locator('#cartelEscaneo').isHidden());
 ok('se ve la hoja', !(await pag.locator('#hojaEnvoltura').isHidden()));
-ok('y dice por qué no se corrige', /no se corrige|foto seguir/i.test(await pag.textContent('#reconocidoResumen')));
+ok('avisa de que corregir cambia también la foto',
+   /tapa|foto cambia/i.test(await pag.textContent('#reconocidoResumen')));
 
 console.log('\n--- el PDF que sale ---');
 const bajada = pag.waitForEvent('download');

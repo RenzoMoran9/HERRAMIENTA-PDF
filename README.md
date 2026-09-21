@@ -51,11 +51,11 @@ Cada cambio queda anotado en la columna de la izquierda, y `Ctrl+Z` deshace.
 - Renglones que mezclan varias tipografías o tamaños: deja escribir, pero
   advierte antes, porque el renglón se reescribe con la tipografía de su
   primera letra.
-- **Corregir lo que dice un escaneo.** Habría que borrar píxeles y dibujar
-  encima, y el resultado ya no sería copia fiel del papel que se escaneó. En
-  un expediente de contratación eso importa, así que el editor no lo hace.
-  Para escribir *encima* —una nota, un «COPIA FIEL», un sello— está
-  **Sello y marcas** en Grapa, que añade el texto sin tocar el escaneo.
+- **Devolver un escaneo corregido a su estado original.** La capa se puede
+  volver a escribir, pero el editor no guarda el texto que había antes de la
+  primera corrección. Dentro de la misma sesión, `Ctrl+Z`.
+- **Reproducir una tipografía manuscrita o poco corriente** al corregir un
+  escaneo: se escribe con la equivalente estándar, normal o negrita.
 - Borrar un renglón entero.
 - La tipografía que se escribe es la equivalente estándar (las catorce que
   todo lector de PDF trae de serie), no la copia incrustada del original.
@@ -79,10 +79,20 @@ también fuera de aquí: en Acrobat, en el gestor documental, donde sea.
 Va en español, tarda un par de segundos por hoja, y funciona **sin internet**:
 el motor y el idioma viajan dentro del propio archivo.
 
-Una hoja ya reconocida queda marcada y **no se vuelve corregible**. No es una
-manera de decir que no: si se corrigiera esa capa, la foto seguiría diciendo lo
-de antes y el documento mostraría una cifra y copiaría otra. Eso no es un
-documento corregido, es un documento roto.
+### Y después se puede corregir
+
+Una vez reconocida, la hoja **sí se corrige**: pulsas un renglón, escribes, y
+Grapa tapa esa zona con el color del propio papel de ese renglón y escribe
+encima, con el color de su tinta y en negrita si el original lo era.
+
+Lo importante es que cambian **las dos cosas a la vez**: lo que se ve y lo que
+se busca. Si solo se tocara la capa invisible, el documento mostraría una cifra
+y copiaría otra —eso no sería un documento corregido, sería uno roto—.
+
+Todo lo que Grapa añade vive en **una sola capa**, junto con un modelo guardado
+dentro de la propia hoja. La foto original nunca se modifica: lo que tapa es un
+recuadro nuestro. Y como el modelo viaja en el archivo, la hoja se puede seguir
+corrigiendo después de guardarla, cerrarla o pasarla por Grapa.
 
 El reconocimiento se equivoca a veces —confunde `I` con `l`, sobre todo—, así
 que conviene mirarlo antes de fiarse. El editor dice con qué confianza leyó.
@@ -103,6 +113,9 @@ node pruebas/escaneo.mjs      # una hoja escaneada: que se explique, no que
 node pruebas/reconocer.mjs    # reconocer un escaneo: texto buscable donde no
                               # había nada, y la foto intacta píxel a píxel
 node pruebas/suelto-ocr.mjs   # lo mismo desde el disco, con el navegador sin red
+node pruebas/corregir-escaneo.mjs   # corregir un renglón de una foto: comprueba
+                                    # que la FOTO también cambia, volviéndola a
+                                    # leer con el propio OCR
 node pruebas/hacer-escaneo.mjs pruebas/postores.pdf pruebas/escaneo.pdf
 node pruebas/hacer-correo.mjs pruebas/correo.pdf   # rehace ese PDF de prueba
 ```

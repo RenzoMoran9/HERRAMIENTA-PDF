@@ -60,29 +60,36 @@ async function arrancar(alProgresar) {
 }
 
 /**
- * Reconoce una imagen y devuelve las palabras con su recuadro, en píxeles
+ * Reconoce una imagen y devuelve los renglones con su recuadro, en píxeles
  * de esa imagen.
- *   { texto, confianza, palabras: [{ texto, conf, x0, y0, x1, y1 }] }
+ *   { texto, confianza, palabras, renglones: [{ texto, conf, x0, y0, x1, y1 }] }
  */
 export async function reconocer(imagen, alProgresar) {
   const t = await arrancar(alProgresar);
   const { data } = await t.recognize(imagen, {}, { text: true, blocks: true });
-  const palabras = [];
+  // Se devuelven RENGLONES, no palabras sueltas: la capa de texto se escribe
+  // por renglón, y así al corregir se corrige la línea entera y no un trozo.
+  const renglones = [];
+  let palabras = 0;
   for (const b of data.blocks || []) {
     for (const p of b.paragraphs || []) {
       for (const l of p.lines || []) {
-        for (const w of l.words || []) {
-          const t2 = (w.text || '').trim();
-          if (!t2 || w.confidence < 30) continue;   // basura del ruido del escaneo
-          palabras.push({
-            texto: t2, conf: w.confidence,
-            x0: w.bbox.x0, y0: w.bbox.y0, x1: w.bbox.x1, y1: w.bbox.y1,
-          });
-        }
+        const buenas = (l.words || []).filter((w) => (w.text || '').trim() && w.confidence >= 30);
+        if (!buenas.length) continue;
+        palabras += buenas.length;
+        const texto = buenas.map((w) => w.text.trim()).join(' ');
+        renglones.push({
+          texto,
+          conf: buenas.reduce((a, w) => a + w.confidence, 0) / buenas.length,
+          x0: Math.min(...buenas.map((w) => w.bbox.x0)),
+          y0: Math.min(...buenas.map((w) => w.bbox.y0)),
+          x1: Math.max(...buenas.map((w) => w.bbox.x1)),
+          y1: Math.max(...buenas.map((w) => w.bbox.y1)),
+        });
       }
     }
   }
-  return { texto: data.text || '', confianza: data.confidence || 0, palabras };
+  return { texto: data.text || '', confianza: data.confidence || 0, renglones, palabras };
 }
 
 export async function soltar() {
