@@ -553,6 +553,139 @@ function medirRenglon(pagina, caja) {
    el PDF pasa a poder buscarse y copiarse, también fuera de aquí. */
 const PPP_OCR = 200;
 
+/**
+ * Limpia la hoja antes de leerla. Dos cosas estorban mucho al reconocimiento
+ * y las dos salen en cualquier formato con cuadros:
+ *
+ *   · Las RAYAS del cuadro. Se pegan a las letras de cada celda y el
+ *     reconocedor las toma por trazos, así que las celdas salen fundidas y
+ *     en un revoltijo. Se borran las tiradas largas de píxeles oscuros,
+ *     que es lo que es una raya y no lo es ninguna letra.
+ *   · La letra CLARA sobre fondo oscuro, como las cabeceras de color. El
+ *     reconocedor busca tinta oscura sobre papel claro; al revés no ve
+ *     nada. Se detecta por zonas y se invierte.
+ */
+function limpiarParaLeer(lienzo) {
+  const an = lienzo.width, al = lienzo.height;
+  const ctx = lienzo.getContext('2d', { willReadFrequently: true });
+  const img = ctx.getImageData(0, 0, an, al);
+  const d = img.data;
+  const lum = new Uint8Array(an * al);
+  for (let i = 0, j = 0; i < lum.length; i++, j += 4) {
+    lum[i] = (d[j] * 299 + d[j + 1] * 587 + d[j + 2] * 114) / 1000;
+  }
+
+  // 1. el fondo de cada zona, por bloques: lo claro de ese trozo
+  const B = 48;
+  const bx = Math.ceil(an / B), by = Math.ceil(al / B);
+  const fondo = new Uint8Array(bx * by);
+  for (let cy = 0; cy < by; cy++) {
+    for (let cx = 0; cx < bx; cx++) {
+      const muestra = [];
+      for (let y = cy * B; y < Math.min(al, (cy + 1) * B); y += 2) {
+        for (let x = cx * B; x < Math.min(an, (cx + 1) * B); x += 2) muestra.push(lum[y * an + x]);
+      }
+      muestra.sort((a, b) => a - b);
+      fondo[cy * bx + cx] = muestra.length ? muestra[Math.floor(muestra.length * 0.8)] : 255;
+    }
+  }
+
+  // 2. Donde el fondo es más oscuro que el papel de la hoja, se le da la
+  //    vuelta a la zona: las cabeceras de color llevan letra clara sobre
+  //    fondo oscuro y el reconocedor no ve nada. El umbral es relativo al
+  //    papel de ESTA hoja, no un número fijo: esas cabeceras suelen ser
+  //    grises o de color suave, no negras.
+  //
+  //    Y al invertir una zona hay que invertir TAMBIÉN su fondo de
+  //    referencia. Si no, todo lo de esa zona pasa a contarse como oscuro,
+  //    el paso siguiente lo toma por una raya larguísima y lo borra entero.
+  const papeles = Array.from(fondo).sort((a, b) => a - b);
+  const papelHoja = papeles[Math.floor(papeles.length * 0.9)] || 255;
+  const vuelta = new Uint8Array(bx * by);
+  for (let i = 0; i < fondo.length; i++) {
+    if (fondo[i] < papelHoja * 0.82) { vuelta[i] = 1; fondo[i] = 255 - fondo[i]; }
+  }
+  for (let y = 0; y < al; y++) {
+    const cy = (y / B) | 0;
+    for (let x = 0; x < an; x++) {
+      if (!vuelta[cy * bx + ((x / B) | 0)]) continue;
+      const i = y * an + x;
+      lum[i] = 255 - lum[i];
+      const j = i * 4;
+      d[j] = d[j + 1] = d[j + 2] = lum[i];
+    }
+  }
+
+  // 3. fuera las rayas: tiradas de oscuro más largas que cualquier letra
+  const oscuro = (x, y) => {
+    const cy = (y / B) | 0;
+    return lum[y * an + x] < Math.max(60, fondo[cy * bx + ((x / B) | 0)]) * 0.72;
+  };
+  // Una raya escaneada no es una tirada continua: el grano la parte cada
+  // pocos píxeles. Si no se toleran huecos cortos no se detecta ninguna.
+  const HUECO = 4;
+  const borrar = new Uint8Array(an * al);
+  const largoH = Math.max(40, Math.round(an * 0.10));
+  const largoV = Math.max(30, Math.round(al * 0.020));
+  const barrer = (cuantos, cada, esOscuro, marcar, largo) => {
+    for (let i = 0; i < cuantos; i++) {
+      let ini = -1, vacio = 0;
+      for (let j = 0; j <= cada; j++) {
+        const es = j < cada && esOscuro(i, j);
+        if (es) { if (ini < 0) ini = j; vacio = 0; continue; }
+        if (ini < 0) continue;
+        vacio++;
+        if (vacio > HUECO || j === cada) {
+          const fin = j - vacio + 1;
+          if (fin - ini >= largo) for (let k = ini; k < fin; k++) marcar(i, k);
+          ini = -1; vacio = 0;
+        }
+      }
+    }
+  };
+  const porFila = new Int32Array(al);
+  barrer(al, an, (y, x) => oscuro(x, y), (y, x) => { borrar[y * an + x] = 1; porFila[y]++; }, largoH);
+  const porColumna = new Int32Array(an);
+  barrer(an, al, (x, y) => oscuro(x, y), (x, y) => { borrar[y * an + x] = 1; porColumna[x]++; }, largoV);
+
+  // Dónde están las rayas VERTICALES: son los bordes de las celdas, y saber
+  // dónde caen permite después partir cada fila del cuadro en celdas.
+  //
+  // No basta con «hay una tirada larga de oscuro»: un logo o una firma
+  // también la dan. Lo que distingue a una raya es que además es FINA. Así
+  // que se exige que a los lados no haya casi nada marcado.
+  const juntar = (cuenta, total, minimo, vecinos) => {
+    const salida = [];
+    const v = (i) => (i >= 0 && i < total ? cuenta[i] : 0);
+    for (let i = 0; i < total; i++) {
+      if (cuenta[i] < minimo) continue;
+      // una raya es FINA: un logo o una firma también dan tiradas largas
+      if (v(i - vecinos) > minimo * 0.4 || v(i + vecinos) > minimo * 0.4) continue;
+      if (salida.length && i - salida[salida.length - 1] <= vecinos) continue;
+      salida.push(i);
+    }
+    return salida;
+  };
+  const columnas = juntar(porColumna, an, largoV, 6);
+  const filas = juntar(porFila, al, largoH, 6);
+  for (let y = 0; y < al; y++) {
+    const cy = (y / B) | 0;
+    for (let x = 0; x < an; x++) {
+      const i = y * an + x;
+      if (!borrar[i]) continue;
+      const claro = fondo[cy * bx + ((x / B) | 0)];
+      const j = i * 4;
+      d[j] = d[j + 1] = d[j + 2] = claro;
+    }
+  }
+
+  const salida = document.createElement('canvas');
+  salida.width = an; salida.height = al;
+  salida.getContext('2d').putImageData(img, 0, 0);
+  return { lienzo: salida, columnas, filas };
+}
+
+
 async function reconocerHoja() {
   if (!doc) return;
   const pagina = doc.loadPage(paginaActual);
@@ -562,11 +695,16 @@ async function reconocerHoja() {
   cargando(true, 'Preparando el reconocimiento…');
   try {
     const pix = pagina.toPixmap(Matrix.scale(escala, escala), ColorSpace.DeviceRGB, false, true);
-    const foto = new Blob([pix.asPNG()], { type: 'image/png' });
+    const crudo = document.createElement('canvas');
+    crudo.width = pix.getWidth(); crudo.height = pix.getHeight();
+    crudo.getContext('2d').putImageData(aImageData(pix, crudo.width, crudo.height), 0, 0);
     pix.destroy();
+    cargando(true, 'Limpiando la hoja para leerla…');
+    const limpia = limpiarParaLeer(crudo);
+    const foto = await new Promise((r) => limpia.lienzo.toBlob(r, 'image/png'));
 
     const t0 = performance.now();
-    const salida = await reconocer(foto, (estado, avance) => {
+    const salida = await reconocer(foto, { columnas: limpia.columnas, filas: limpia.filas }, (estado, avance) => {
       const nombres = {
         'loading tesseract core': 'Cargando el motor…',
         'initializing tesseract': 'Arrancando el motor…',

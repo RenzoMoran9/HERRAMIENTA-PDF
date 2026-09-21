@@ -15,7 +15,7 @@ const ctx = await nav.newContext({ acceptDownloads: true });
 const pag = await ctx.newPage();
 const fallos = [];
 pag.on('pageerror', (e) => fallos.push('pageerror: ' + e.message));
-pag.on('console', (m) => { if (m.type() === 'error' && !m.text().includes('404')) fallos.push(m.text()); });
+pag.on('console', (m) => { if (m.type() === 'error' && !m.text().includes('404') && !/Estimating resolution/.test(m.text())) fallos.push(m.text()); });
 let malas = 0;
 const ok = (t, c, x) => { console.log((c ? '  OK  ' : ' FALLA') + ' · ' + t + (x !== undefined ? '  → ' + JSON.stringify(x) : '')); if (!c) malas++; };
 

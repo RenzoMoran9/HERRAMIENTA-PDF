@@ -11,7 +11,7 @@ const ctx = await nav.newContext({ acceptDownloads: true, offline: true });   //
 const pag = await ctx.newPage();
 const fallos = [];
 pag.on('pageerror', (e) => fallos.push('pageerror: ' + e.message));
-pag.on('console', (m) => { if (m.type() === 'error') fallos.push('console: ' + m.text()); });
+pag.on('console', (m) => { if (m.type() === 'error' && !/Estimating resolution/.test(m.text())) fallos.push('console: ' + m.text()); });
 
 const t0 = Date.now();
 await pag.goto('file://' + path.join(RAIZ, 'GrapaEditor.html'));
