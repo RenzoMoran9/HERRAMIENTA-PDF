@@ -12,5 +12,11 @@
 !pruebas/postores.pdf
 !pruebas/correo.pdf
 !pruebas/escaneo.pdf
+!pruebas/cuadro.pdf
+!pruebas/escaneo-girado.pdf
+!pruebas/firma-vacia.pdf
+!pruebas/firmado.pdf
+!pruebas/girado.pdf
+!pruebas/solicitud.pdf
 
 node_modules/
