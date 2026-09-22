@@ -296,6 +296,10 @@ svg[class^="ico"], svg[class*=" ico"]{
   animation:girar .8s linear infinite;
 }
 @keyframes girar{ to{ transform:rotate(360deg); } }
+/* leyendo varias hojas seguidas: cuánto falta, y poder pararlo */
+.carga-cuerpo{ display:flex; flex-direction:column; gap:8px; min-width:250px; }
+.carga-barra{ height:6px; border-radius:3px; background:var(--borde-suave); overflow:hidden; }
+.carga-barra i{ display:block; height:100%; width:0; background:var(--acento); transition:width .3s; }
 
 .avisos{
   position:fixed; right:16px; bottom:40px; z-index:95;

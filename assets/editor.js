@@ -40,6 +40,7 @@ function avisar(texto, tipo) {
 function cargando(si, texto) {
   $('#capaCarga').hidden = !si;
   if (texto) $('#cargaTexto').textContent = texto;
+  if (!si) { $('#cargaBarra').hidden = true; $('#cargaDetener').hidden = true; }
 }
 
 /* ---------- geometría de la hoja ----------
@@ -1460,74 +1461,174 @@ function limpiarParaLeer(lienzo) {
 }
 
 
-async function reconocerHoja() {
-  if (!doc) return;
-  const pagina = doc.loadPage(paginaActual);
+const NOMBRES_OCR = {
+  'loading tesseract core': 'Cargando el motor…',
+  'initializing tesseract': 'Arrancando el motor…',
+  'loading language traineddata': 'Cargando el español…',
+  'initializing api': 'Casi listo…',
+  'recognizing text': 'Leyendo la hoja…',
+};
+
+/**
+ * Lee la hoja n y le pone encima el texto invisible. No toca la pila de
+ * deshacer ni avisa: eso lo hace quien llama, que puede ser una hoja sola o
+ * todas seguidas. Devuelve { salida, ms } o { vacia: true }.
+ */
+async function leerYPonerTexto(n, alEstado) {
+  const pagina = doc.loadPage(n);
   const marco = marcoDe(pagina);
   const escala = PPP_OCR / 72;
+  const pix = pagina.toPixmap(Matrix.scale(escala, escala), ColorSpace.DeviceRGB, false, true);
+  const crudo = document.createElement('canvas');
+  crudo.width = pix.getWidth(); crudo.height = pix.getHeight();
+  crudo.getContext('2d').putImageData(aImageData(pix, crudo.width, crudo.height), 0, 0);
+  pix.destroy();
+  alEstado('Limpiando la hoja para leerla…');
+  const limpia = limpiarParaLeer(crudo);
+  const foto = await new Promise((r) => limpia.lienzo.toBlob(r, 'image/png'));
 
+  const t0 = performance.now();
+  const salida = await reconocer(foto, { columnas: limpia.columnas, filas: limpia.filas }, (estado, avance) => {
+    alEstado(NOMBRES_OCR[estado] || estado, avance);
+  });
+  const ms = Math.round(performance.now() - t0);
+  if (!salida.renglones.length) return { vacia: true };
+
+  alEstado('Poniendo el texto encima de la foto…');
+  const modelo = {
+    v: 1, ocr: true,
+    renglones: salida.renglones.map((w) => ({
+      t: w.texto,
+      x0: w.x0 / escala, y0: w.y0 / escala, x1: w.x1 / escala, y1: w.y1 / escala,
+    })),
+  };
+  const bytes = aplicarCapa(pagina, modelo, marco);
+  if (!bytes) throw new Error('No se pudo escribir el texto.');
+  bytesActuales = bytes;
+  abrirBytes(bytes, nombre);
+  reconocidos.set(n, {
+    texto: salida.texto, confianza: Math.round(salida.confianza),
+    palabras: salida.palabras, renglones: salida.renglones.length, ms,
+  });
+  return { salida, ms };
+}
+
+async function reconocerHoja() {
+  if (!doc) return;
+  const respaldo = bytesActuales;
   cargando(true, 'Preparando el reconocimiento…');
   try {
-    const pix = pagina.toPixmap(Matrix.scale(escala, escala), ColorSpace.DeviceRGB, false, true);
-    const crudo = document.createElement('canvas');
-    crudo.width = pix.getWidth(); crudo.height = pix.getHeight();
-    crudo.getContext('2d').putImageData(aImageData(pix, crudo.width, crudo.height), 0, 0);
-    pix.destroy();
-    cargando(true, 'Limpiando la hoja para leerla…');
-    const limpia = limpiarParaLeer(crudo);
-    const foto = await new Promise((r) => limpia.lienzo.toBlob(r, 'image/png'));
-
-    const t0 = performance.now();
-    const salida = await reconocer(foto, { columnas: limpia.columnas, filas: limpia.filas }, (estado, avance) => {
-      const nombres = {
-        'loading tesseract core': 'Cargando el motor…',
-        'initializing tesseract': 'Arrancando el motor…',
-        'loading language traineddata': 'Cargando el español…',
-        'initializing api': 'Casi listo…',
-        'recognizing text': 'Leyendo la hoja…',
-      };
-      const t = nombres[estado] || estado;
-      cargando(true, t + (avance ? ' ' + Math.round(avance * 100) + '%' : ''));
-    });
-    const ms = Math.round(performance.now() - t0);
-
-    if (!salida.renglones.length) {
+    const r = await leerYPonerTexto(paginaActual, (t, avance) =>
+      cargando(true, t + (avance ? ' ' + Math.round(avance * 100) + '%' : '')));
+    if (r.vacia) {
       cargando(false);
       avisar('No se reconoció ninguna palabra en esta hoja.', 'mal');
       return;
     }
-
-    const respaldo = bytesActuales;
-    cargando(true, 'Poniendo el texto encima de la foto…');
-    const modelo = {
-      v: 1, ocr: true,
-      renglones: salida.renglones.map((w) => ({
-        t: w.texto,
-        x0: w.x0 / escala, y0: w.y0 / escala, x1: w.x1 / escala, y1: w.y1 / escala,
-      })),
-    };
-    const bytes = aplicarCapa(pagina, modelo, marco);
-    if (!bytes) { abrirBytes(respaldo, nombre); cargando(false); avisar('No se pudo escribir el texto.', 'mal'); return; }
-
     pila.push({ bytes: respaldo, cambios: cambios.slice() });
     $('#btnDeshacer').disabled = false;
-    bytesActuales = bytes;
-    abrirBytes(bytes, nombre);
-    reconocidos.set(paginaActual, {
-      texto: salida.texto, confianza: Math.round(salida.confianza),
-      palabras: salida.palabras, renglones: salida.renglones.length, ms,
-    });
     cargando(false);
     dibujar();
     descargado = false;
     apuntarTrabajo();
-    avisar(`Reconocidos ${salida.renglones.length} renglones, ${salida.palabras} palabras `
-      + `(${Math.round(salida.confianza)} % de confianza) en ${(ms / 1000).toFixed(1)} s.`, 'bien');
+    avisar(`Reconocidos ${r.salida.renglones.length} renglones, ${r.salida.palabras} palabras `
+      + `(${Math.round(r.salida.confianza)} % de confianza) en ${(r.ms / 1000).toFixed(1)} s.`, 'bien');
   } catch (e) {
     console.error(e);
+    if (respaldo && bytesActuales !== respaldo) { bytesActuales = respaldo; abrirBytes(respaldo, nombre); }
     cargando(false);
     avisar('No se pudo reconocer: ' + e.message, 'mal');
   }
+}
+
+/**
+ * Las hojas que son solo foto: sin texto de verdad y sin reconocer todavía.
+ * Las que ya tienen texto no se tocan: leerlas otra vez no añade nada.
+ */
+function hojasPorLeer() {
+  const faltan = [];
+  for (let n = 0; n < totalPaginas; n++) {
+    const pagina = doc.loadPage(n);
+    const modelo = modeloDe(pagina);
+    if (modelo && modelo.ocr !== false) continue;
+    // lo mismo que cuenta Grapa al buscar: con menos de 20 letras es una
+    // foto con algún resto suelto (un número, una marca), no una hoja de texto
+    const letras = leerRenglones(pagina).reduce((a, r) => a + String(r.texto || '').replace(/\s/g, '').length, 0);
+    if (letras >= 20) continue;
+    faltan.push(n);
+  }
+  return faltan;
+}
+
+let detenerLectura = false;
+
+/**
+ * Lee todas las hojas escaneadas seguidas, con su avance, y deja UN solo paso
+ * que deshacer. Se puede detener: lo ya leído se queda.
+ * Devuelve { leidas, vacias, total, detenido }.
+ */
+async function reconocerTodas() {
+  const faltan = hojasPorLeer();
+  const res = { leidas: 0, vacias: 0, total: faltan.length, detenido: false };
+  if (!faltan.length) return res;
+  const respaldo = bytesActuales;
+  detenerLectura = false;
+  $('#cargaBarra').hidden = false;
+  $('#cargaDetener').hidden = false;
+  $('#cargaDetener').disabled = false;
+  const pintarAvance = (k, dentro) => {
+    $('#cargaAvance').style.width = Math.round(((k + (dentro || 0)) / faltan.length) * 100) + '%';
+  };
+  try {
+    for (let k = 0; k < faltan.length; k++) {
+      if (detenerLectura) { res.detenido = true; break; }
+      const n = faltan[k];
+      const cabeza = `Hoja ${k + 1} de ${faltan.length}`;
+      pintarAvance(k, 0);
+      cargando(true, cabeza + ' · Preparando…');
+      const r = await leerYPonerTexto(n, (t, avance) => {
+        cargando(true, cabeza + ' · ' + t + (avance ? ' ' + Math.round(avance * 100) + '%' : ''));
+        if (avance) pintarAvance(k, avance);
+      });
+      if (r.vacia) res.vacias++; else res.leidas++;
+    }
+    pintarAvance(faltan.length, 0);
+  } catch (e) {
+    cargando(false);
+    throw e;
+  }
+  if (res.leidas) {
+    pila.push({ bytes: respaldo, cambios: cambios.slice() });
+    $('#btnDeshacer').disabled = false;
+    descargado = false;
+    apuntarTrabajo();
+  }
+  cargando(false);
+  dibujar();
+  return res;
+}
+
+/**
+ * Lo que pide Grapa con «Hacer buscables»: leer todas las hojas escaneadas
+ * y devolvérselas. Aquí no hay nada que decidir, así que al terminar se
+ * devuelve solo y la pestaña se cierra.
+ */
+async function hacerBuscableParaGrapa() {
+  let res;
+  try {
+    res = await reconocerTodas();
+  } catch (e) {
+    console.error(e);
+    avisar('No se pudo reconocer: ' + e.message + '. No se devolvió nada a Grapa.', 'mal');
+    return;
+  }
+  if (res.detenido && !res.leidas) {
+    avisar('Detenido. No se devolvió nada a Grapa.', '');
+    return;
+  }
+  devolver({ tarea: 'buscable', leidas: res.leidas, vacias: res.vacias, total: res.total });
+  avisar(`Listo: ${res.leidas} hoja(s) ya se pueden buscar. Vuelve a la pestaña de Grapa.`, 'bien');
+  if (!res.detenido) setTimeout(() => { try { window.close(); } catch (e) {} }, 1500);
 }
 
 /* ---------- la capa de Grapa sobre una hoja escaneada ----------
@@ -3022,9 +3123,10 @@ function descargar() {
   setTimeout(() => URL.revokeObjectURL(u), 4000);
 }
 
-function devolver() {
+function devolver(extra) {
   if (!grapa || grapa.closed) { avisar('La ventana de Grapa ya no está abierta.', 'mal'); return; }
-  grapa.postMessage({ grapa: 'documento-editado', nombre, bytes: bytesActuales, cambios: cambios.length }, '*');
+  grapa.postMessage(Object.assign({ grapa: 'documento-editado', nombre, bytes: bytesActuales, cambios: cambios.length },
+    extra && extra.tarea ? extra : {}), '*');
   descargado = true;
   avisar('Devuelto a Grapa.', 'bien');
 }
@@ -3036,6 +3138,7 @@ window.addEventListener('message', (ev) => {
   grapa = ev.source || window.opener;
   $('#btnDevolver').hidden = false;
   estrenarDocumento(new Uint8Array(d.bytes), d.nombre || 'documento.pdf');
+  if (d.tarea === 'buscable') { hacerBuscableParaGrapa(); return; }
   avisar('Documento recibido de Grapa.', 'bien');
 });
 
@@ -3044,7 +3147,12 @@ $('#btnEntendidoFirma').addEventListener('click', () => { $('#avisoFirma').hidde
 $('#btnAbrir').addEventListener('click', () => $('#archivo').click());
 $('#archivo').addEventListener('change', (e) => { leerArchivo(e.target.files[0]); e.target.value = ''; });
 $('#btnDescargar').addEventListener('click', descargar);
-$('#btnDevolver').addEventListener('click', devolver);
+$('#btnDevolver').addEventListener('click', () => devolver());
+$('#cargaDetener').addEventListener('click', () => {
+  detenerLectura = true;
+  $('#cargaDetener').disabled = true;
+  $('#cargaTexto').textContent = 'Deteniendo al terminar esta hoja…';
+});
 $('#btnDeshacer').addEventListener('click', deshacer);
 $('#btnReconocer').addEventListener('click', reconocerHoja);
 $('#btnCopiarTexto').addEventListener('click', async () => {

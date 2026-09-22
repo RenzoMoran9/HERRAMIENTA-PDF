@@ -228,6 +228,12 @@ también fuera de aquí: en Acrobat, en el gestor documental, donde sea.
 Va en español, tarda un par de segundos por hoja, y funciona **sin internet**:
 el motor y el idioma viajan dentro del propio archivo.
 
+Desde Grapa, **Hacer buscables** (en «Buscar») manda todas las hojas
+escaneadas del expediente de una vez: el editor las lee seguidas, con la
+cuenta de «Hoja 3 de 12» y un botón **Detener**, se las devuelve a Grapa y
+se cierra solo. Las hojas que ya tienen texto o ya se reconocieron no se
+vuelven a leer.
+
 ### Y después se puede corregir
 
 Una vez reconocida, la hoja **sí se corrige**: pulsas un renglón, escribes, y
