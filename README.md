@@ -24,10 +24,22 @@ También sirve suelto: arrastra un PDF encima y listo.
 ### Editar un renglón
 
 1. Haz clic sobre el renglón que quieras corregir.
-2. Escribe el texto nuevo.
+2. Escribe el texto nuevo **sobre la propia hoja**: el campo tiene la letra, el
+   tamaño y el color del renglón, y el papel de debajo, así que se ve ya como
+   va a quedar.
 3. `Enter` para aplicar, `Esc` para dejarlo como estaba.
 
 Cada cambio queda anotado en la columna de la izquierda, y `Ctrl+Z` deshace.
+
+### Mover lo que corriges
+
+Mientras escribes, a la izquierda del campo hay un **asa** (⠇): arrástrala y el
+texto se va con ella. Para ajustar fino, `Alt` + flechas lo corre medio punto,
+y `Alt` + `Shift` + flechas, dos. Con `Enter` queda donde lo dejaste.
+
+Sirve también para mover un renglón **sin cambiarle el texto**, o uno que ya
+corregiste: pulsa sobre él, muévelo y `Enter`. En una hoja escaneada, lo viejo
+sigue tapado en su sitio y el texto nuevo va donde lo pongas.
 
 ### Borrar un renglón
 
@@ -318,6 +330,9 @@ node pruebas/guardado.mjs     # guardar el trabajo y recuperarlo al volver,
                               # por la web y desde el archivo suelto
 node pruebas/pasos.mjs        # los botones «−» y «+» del tamaño
 node pruebas/hacer-tachar.mjs # rehace la declaración inventada de tachar.pdf
+node pruebas/natural.mjs      # corregir sobre la hoja con su letra y su papel,
+                              # mover lo corregido, y que en un escaneo salga
+                              # del tamaño del original y sin negrita falsa
 node pruebas/tachar.mjs       # tachar de verdad: el DNI fuera del texto, de
                               # dentro del archivo y de la foto, también en
                               # escaneos reconocidos y en hojas giradas

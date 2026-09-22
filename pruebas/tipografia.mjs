@@ -133,7 +133,7 @@ await pag.mouse.click(punto.x, punto.y);
 await pag.waitForSelector('.campo', { timeout: 5000 });
 const ayuda = await pag.textContent('.campo-ayuda');
 ok('al insertar dice la tipografía del documento, sin el prefijo de subconjunto',
-   /Se escribirá en LiberationSans/.test(ayuda) && !/\+/.test(ayuda), ayuda);
+   /Se escribirá en LiberationSans /.test(ayuda) && !/Se escribirá en \S*\+/.test(ayuda), ayuda);
 await pag.fill('.campo', 'antes de la entrega');
 await pag.press('.campo', 'Enter');
 hechos++;

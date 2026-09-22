@@ -46,7 +46,7 @@ ok('se encuentra el renglón que se va a borrar', idxB >= 0, idxB);
 await pag.locator('.renglon').nth(idxB).click();
 await pag.waitForSelector('.campo', { timeout: 5000 });
 ok('la ayuda dice cómo se borra',
-   /vacío \+ Enter lo borra/.test(await pag.textContent('.campo-ayuda')),
+   /vacío \+ Enter: borrar/.test(await pag.textContent('.campo-ayuda')),
    await pag.textContent('.campo-ayuda'));
 await pag.fill('.campo', '');
 await pag.press('.campo', 'Enter');
