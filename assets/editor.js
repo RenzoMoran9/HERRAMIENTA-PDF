@@ -23,6 +23,8 @@ let cambios = [];           // lo que se le muestra al usuario
 let contadorFuente = 0;
 let grapa = null;           // la ventana de Grapa, si vino de allí
 const reconocidos = new Map();  // lo que dijo el OCR, por hoja
+let tachas = [];            // { hoja, caja: [x0, y0, x1, y1] } · lo que se va a tachar
+let tachando = false;       // ¿se están marcando zonas para tachar?
 
 /* ---------- utilidades de pantalla ---------- */
 function avisar(texto, tipo) {
@@ -683,6 +685,8 @@ function estrenarDocumento(bytes, comoSeLlama) {
   $('#paginador').hidden = false;
   $('#btnDescargar').disabled = false;
   $('#btnInsertar').disabled = false;
+  $('#btnTachar').disabled = false;
+  tachas = [];
   $('#recuperar').hidden = true;
   descargado = true;
   pintarCambios();
@@ -758,8 +762,9 @@ function dibujar() {
   const conOCR = !!modelo && modelo.ocr !== false;
   const esEscaneo = renglones.length === 0 && !conOCR;
   pintarRenglones();
-  $('#cartelEscaneo').hidden = !esEscaneo;
-  $('#hojaEnvoltura').hidden = esEscaneo;
+  pintarTachas();
+  $('#cartelEscaneo').hidden = !esEscaneo || tachando;
+  $('#hojaEnvoltura').hidden = esEscaneo && !tachando;
   pintarReconocido(conOCR);
   pintarCambios();
 
@@ -786,6 +791,8 @@ function capaRenglones() { $('#renglones').textContent = ''; }
 function pintarRenglones() {
   const capa = $('#renglones');
   capa.textContent = '';
+  // tachando, las zonas se marcan arrastrando: los renglones no recogen el clic
+  capa.classList.toggle('tachando', tachando);
   renglones.forEach((r, i) => {
     const d = document.createElement('div');
     d.className = 'renglon';
@@ -1664,6 +1671,12 @@ function aplicarCapa(pagina, modelo, marco) {
     }
   }
 
+  // Lo tachado va lo último y en negro: aunque un parche de papel caiga
+  // encima de esa zona, el recuadro sigue viéndose.
+  for (const c of modelo.tachados || []) {
+    buf.writeLine('q 0 0 0 rg ' + rectanguloEnHoja(marco, c[0], c[1], c[2] - c[0], c[3] - c[1]) + ' f Q');
+  }
+
   // Un solo flujo, reescrito entero: si ya existe, se sustituye. Pero hay que
   // mirar que siga colgando de la hoja: una redacción reescribe TODO el
   // contenido y puede dejar nuestro flujo descolgado, y entonces escribir en
@@ -2358,6 +2371,7 @@ let insertando = false;
 
 function modoInsertar(si) {
   insertando = !!si && !!doc && !$('#hojaEnvoltura').hidden;
+  if (insertando && tachando) modoTachar(false);
   $('#renglones').classList.toggle('insertando', insertando);
   $('#btnInsertar').classList.toggle('activo', insertando);
   if (!insertando) cerrarCampo();
@@ -2408,12 +2422,361 @@ function campoInsertar(xHoja, yHoja) {
 }
 
 $('#renglones').addEventListener('click', (ev) => {
-  if (!insertando || campoAbierto) return;
+  if (!insertando || tachando || campoAbierto) return;
   const caja = ev.currentTarget.getBoundingClientRect();
   campoInsertar((ev.clientX - caja.left) / escala, (ev.clientY - caja.top) / escala);
 });
 
 $('#btnInsertar').addEventListener('click', () => modoInsertar(!insertando));
+
+/* ---------- tachar de verdad ----------
+
+   Tachar un DNI, una cuenta o un nombre no es ponerle un rectángulo negro
+   encima: eso se levanta copiando y pegando, o abriendo el archivo con
+   cualquier otro programa. Aquí se usa la redacción de MuPDF, que:
+
+     · QUITA del archivo las letras que caen dentro de la zona;
+     · pinta de negro los PÍXELES de la foto en esa zona, si la hoja es un
+       escaneo, en la imagen misma y no encima;
+     · y deja un recuadro negro donde estaba, para que se vea que ahí había
+       algo.
+
+   Dos cosas más para que no quede ni rastro:
+
+     · el archivo se guarda LIMPIO (garbage): si no, el trozo viejo de la
+       hoja se queda dentro del PDF como un objeto suelto que nadie dibuja
+       pero que cualquiera puede leer;
+     · en una hoja escaneada y reconocida, el texto reconocido vive también
+       en el modelo que guarda Grapa dentro de la hoja. Se borra de ahí lo
+       que cae en la zona, o volvería a salir en la siguiente corrección.
+
+   Primero se marcan las zonas —arrastrando sobre la hoja, o todas las
+   veces que aparece una palabra— y se tachan todas juntas: un solo paso
+   que deshacer.                                                       */
+
+
+/** Las letras de la hoja que caen dentro de la caja (por su centro). */
+function textoEnCaja(pagina, caja) {
+  let t = '';
+  const [x0, y0, x1, y1] = caja;
+  pagina.toStructuredText('preserve-whitespace').walk({
+    onChar(c, origin, font, size, quad) {
+      const cx = (quad[0] + quad[2] + quad[4] + quad[6]) / 4;
+      const cy = (quad[1] + quad[3] + quad[5] + quad[7]) / 4;
+      if (cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1) t += c;
+    },
+  });
+  return t;
+}
+
+/** Guardar sin los objetos que ya no usa nadie: ahí dormía lo tachado. */
+function bytesLimpios(documento) {
+  const buf = documento.saveToBuffer('garbage');
+  const copia = new Uint8Array(buf.asUint8Array());
+  try { buf.destroy(); } catch (e) {}
+  return copia;
+}
+
+/**
+ * Del texto reconocido, fuera lo que cae en las cajas. Cada letra se sitúa
+ * a lo largo de su renglón según lo que mide —así la escribe la capa, que
+ * estira el renglón a lo ancho que ocupa en la foto—, y las que caen dentro
+ * se quitan. Lo que queda a cada lado pasa a ser un renglón por su cuenta,
+ * con su sitio exacto: con espacios en el hueco, el renglón se volvía a
+ * estirar entero y lo de al lado se corría dentro de la zona.
+ */
+function limpiarModelo(modelo, cajas) {
+  const letra = new Font('Helvetica');
+  const nuevos = [];
+  for (const r of modelo.renglones) {
+    if (!r.t) continue;
+    const alto = r.y1 - r.y0;
+    const dentro = cajas.filter((c) => Math.min(r.y1, c[3]) - Math.max(r.y0, c[1]) >= alto * 0.4);
+    if (!dentro.length) continue;
+    const letras = [...r.t];
+    const medidas = letras.map((c) => Math.max(0.01, medirAncho(letra, comoQuedara(c).texto || 'x', 10)));
+    const total = medidas.reduce((a, b) => a + b, 0);
+    const propio = r.editado || r.insertado;
+    if (propio) {
+      // lo que escribimos nosotros va con su propio tamaño: se deja en su
+      // sitio y lo tachado pasa a espacios; el recuadro negro lo tapa
+      const x0 = r.x != null ? r.x : r.x0, ancho = (r.hueco || r.x1 - r.x0);
+      let x = x0, t = '';
+      letras.forEach((c, i) => {
+        const w = (medidas[i] / total) * ancho, centro = x + w / 2;
+        x += w;
+        t += dentro.some((k) => centro >= k[0] && centro <= k[2]) ? ' ' : c;
+      });
+      r.t = t.trim() ? t : '';
+      continue;
+    }
+    // los trozos que se quedan, cada uno con lo que ocupa
+    const ancho = r.x1 - r.x0;
+    const trozos = [];
+    let x = r.x0, act = null;
+    letras.forEach((c, i) => {
+      const w = (medidas[i] / total) * ancho, centro = x + w / 2;
+      const fuera = !dentro.some((k) => centro >= k[0] && centro <= k[2]);
+      if (fuera) {
+        if (!act) { act = { t: '', x0: x }; trozos.push(act); }
+        act.t += c; act.x1 = x + w;
+      } else act = null;
+      x += w;
+    });
+    const utiles = trozos.filter((k) => k.t.trim());
+    if (!utiles.length) { r.t = ''; continue; }
+    utiles.forEach((k, i) => {
+      const destino = i === 0 ? r : Object.assign({}, r);
+      destino.t = k.t; destino.x0 = k.x0; destino.x1 = k.x1;
+      if (i > 0) nuevos.push(destino);
+    });
+  }
+  modelo.renglones.push(...nuevos);
+}
+
+/** Quita de la hoja la capa del reconocimiento, para volver a ponerla
+ *  limpia después de tachar: una redacción reescribe todo el contenido y
+ *  la dejaría metida dentro, con el texto viejo. */
+function quitarCapa(objPag) {
+  const capa = objPag.get(CLAVE_CAPA);
+  const cont = objPag.get('Contents');
+  if (cont.isArray()) {
+    const mismo = (a, b) => a && b && a.isIndirect && a.isIndirect() && b.isIndirect && b.isIndirect()
+      && a.asIndirect() === b.asIndirect();
+    const esApertura = (o) => {
+      try { return o.isStream() && o.readStream().asString().trim() === 'q'; } catch (e) { return false; }
+    };
+    const arr = doc.newArray();
+    for (let i = 0; i < cont.length; i++) {
+      const o = cont.get(i);
+      if (mismo(o, capa)) continue;
+      // el «q» con que envolverContenido abrió lo anterior: sin su capa, sobra
+      if (i === 0 && objPag.get('GrapaEnvuelto').isBoolean && objPag.get('GrapaEnvuelto').isBoolean() && esApertura(o)) continue;
+      arr.push(o);
+    }
+    objPag.put('Contents', arr);
+  }
+  objPag.delete(CLAVE_CAPA);
+  objPag.delete('GrapaEnvuelto');
+}
+
+function tacharEnHoja(pagina, cajas) {
+  const marco = marcoDe(pagina);
+  const raro = giroRaro(marco);
+  if (raro) return raro;
+  const objPag = pagina.getObject();
+  const modelo = modeloDe(pagina);
+  const conCapa = modelo && modelo.ocr !== false;
+  if (modelo) {
+    limpiarModelo(modelo, cajas);
+    modelo.tachados = (modelo.tachados || []).concat(cajas.map((c) => c.map((v) => Math.round(v * 100) / 100)));
+    if (conCapa) quitarCapa(objPag);
+  }
+  for (const c of cajas) {
+    const an = pagina.createAnnotation('Redact');
+    an.setRect(c);
+    an.update();
+  }
+  // negro encima · los píxeles de la foto, fuera · las rayas tapadas del
+  // todo, fuera · las letras, fuera
+  pagina.applyRedactions(true, 2, 1, 0);
+  if (modelo) {
+    if (conCapa) aplicarCapa(pagina, modelo, marco);
+    else objPag.put(CLAVE_MODELO, doc.newString(JSON.stringify(modelo)));
+  }
+  return '';
+}
+
+function tacharPendientes() {
+  if (!doc || !tachas.length) return;
+  const respaldo = bytesActuales;
+  const lista = tachas.slice();
+  cargando(true, 'Tachando…');
+  setTimeout(() => {
+    const volver = (motivo) => {
+      abrirBytes(respaldo, nombre);
+      cargando(false);
+      dibujar();
+      avisar(motivo, 'mal');
+    };
+    try {
+      const porHoja = new Map();
+      for (const t of lista) {
+        if (!porHoja.has(t.hoja)) porHoja.set(t.hoja, []);
+        porHoja.get(t.hoja).push(t.caja);
+      }
+      let letras = 0;
+      for (const [h, cajas] of porHoja) {
+        const pagina = doc.loadPage(h);
+        letras += cajas.reduce((n, c) => n + textoEnCaja(pagina, c).replace(/\s/g, '').length, 0);
+        const fallo = tacharEnHoja(pagina, cajas);
+        if (fallo) return volver('Hoja ' + (h + 1) + ': ' + fallo);
+      }
+      const salida = bytesLimpios(doc);
+
+      // Comprobar en el archivo que sale, no en lo que creemos haber hecho:
+      // en ninguna zona tachada puede quedar ni una letra
+      const comp = PDFDocument.openDocument(salida, 'application/pdf');
+      for (const [h, cajas] of porHoja) {
+        const pagina = comp.loadPage(h);
+        for (const c of cajas) {
+          if (textoEnCaja(pagina, c).trim()) {
+            return volver('En la hoja ' + (h + 1) + ' quedaba texto dentro de la zona; no se tachó nada.');
+          }
+        }
+      }
+
+      pila.push({ bytes: respaldo, cambios: cambios.slice() });
+      // en la lista de cambios NO se apunta lo que se tachó: esa lista se
+      // guarda en el equipo con el trabajo, y ahí no debe quedar el dato
+      for (const [h, cajas] of porHoja) {
+        cambios.push({ hoja: h, antes: '', despues: '', tachado: cajas.length });
+      }
+      bytesActuales = salida;
+      abrirBytes(salida, nombre);
+      tachas = [];
+      $('#btnDeshacer').disabled = false;
+      cargando(false);
+      modoTachar(false);
+      pintarCambios();
+      dibujar();
+      if (ultimaAguja) buscarEnTodo(true);
+      descargado = false;
+      apuntarTrabajo();
+      const n = lista.length;
+      avisar((n === 1 ? 'Zona tachada' : n + ' zonas tachadas')
+        + (letras ? ': ' + letras + (letras === 1 ? ' letra quitada' : ' letras quitadas') + ' del archivo.' : '.'), 'bien');
+    } catch (e) {
+      volver('No se pudo tachar: ' + e.message);
+    }
+  }, 20);
+}
+
+function modoTachar(si) {
+  tachando = !!si && !!doc;
+  if (tachando && insertando) modoInsertar(false);
+  $('#btnTachar').classList.toggle('activo', tachando);
+  $('#renglones').classList.toggle('tachando', tachando);
+  if (doc) dibujar();
+  pintarTachas();
+}
+
+/** Las zonas por tachar: en la hoja, recuadros rojos; en el lateral, la lista. */
+function pintarTachas() {
+  const capa = $('#renglones');
+  $$('.tacha', capa).forEach((n) => n.remove());
+  tachas.forEach((t, i) => {
+    if (t.hoja !== paginaActual) return;
+    const d = document.createElement('div');
+    d.className = 'tacha';
+    d.style.left = (t.caja[0] * escala) + 'px';
+    d.style.top = (t.caja[1] * escala) + 'px';
+    d.style.width = ((t.caja[2] - t.caja[0]) * escala) + 'px';
+    d.style.height = ((t.caja[3] - t.caja[1]) * escala) + 'px';
+    const x = document.createElement('button');
+    x.type = 'button';
+    x.className = 'tacha-quitar';
+    x.title = 'No tachar esta zona';
+    x.setAttribute('aria-label', 'No tachar esta zona');
+    x.textContent = '×';
+    x.addEventListener('pointerdown', (ev) => ev.stopPropagation());
+    x.addEventListener('click', (ev) => { ev.stopPropagation(); tachas.splice(i, 1); pintarTachas(); });
+    d.appendChild(x);
+    capa.appendChild(d);
+  });
+
+  const panel = $('#panelTachar');
+  panel.hidden = !tachando && !tachas.length;
+  const lista = $('#tachasLista');
+  lista.textContent = '';
+  const porHoja = new Map();
+  tachas.forEach((t) => porHoja.set(t.hoja, (porHoja.get(t.hoja) || 0) + 1));
+  [...porHoja.keys()].sort((a, b) => a - b).forEach((h) => {
+    const li = document.createElement('li');
+    const n = porHoja.get(h);
+    li.textContent = 'Hoja ' + (h + 1) + ' · ' + (n === 1 ? '1 zona' : n + ' zonas');
+    li.addEventListener('click', () => { if (paginaActual !== h) { paginaActual = h; cerrarCampo(); dibujar(); } });
+    lista.appendChild(li);
+  });
+  const n = tachas.length;
+  $('#btnTacharAplicar').disabled = !n;
+  $('#btnTacharAplicar').textContent = n === 1 ? 'Tachar 1 zona' : n ? 'Tachar ' + n + ' zonas' : 'Tachar';
+  $('#btnTacharQuitar').hidden = !n;
+  $('#tacharPista').textContent = tachando
+    ? 'Arrastra sobre la hoja para marcar lo que hay que quitar. Puedes marcar varias zonas, en varias hojas.'
+    : 'Estas zonas están marcadas, pero todavía no se ha tachado nada.';
+}
+
+/** Todas las veces que aparece lo buscado, marcadas para tachar. */
+function tacharCoincidencias() {
+  const aguja = $('#buscarTexto').value.trim();
+  if (!doc || !aguja) { avisar('Escribe primero qué hay que tachar: un DNI, una cuenta, un nombre.', 'mal'); return; }
+  let nuevas = 0;
+  const hojas = new Set();
+  for (let h = 0; h < totalPaginas; h++) {
+    const pagina = doc.loadPage(h);
+    for (const hit of pagina.search(aguja)) {
+      for (const q of hit) {
+        const xs = [q[0], q[2], q[4], q[6]], ys = [q[1], q[3], q[5], q[7]];
+        const caja = [Math.min(...xs) - 0.5, Math.min(...ys) - 0.5, Math.max(...xs) + 0.5, Math.max(...ys) + 0.5];
+        const ya = tachas.some((t) => t.hoja === h && t.caja.every((v, i) => Math.abs(v - caja[i]) < 0.5));
+        if (ya) continue;
+        tachas.push({ hoja: h, caja });
+        nuevas++;
+        hojas.add(h);
+      }
+    }
+  }
+  if (!nuevas) { avisar('No aparece «' + aguja + '» en ninguna hoja.', 'mal'); return; }
+  const primera = Math.min(...hojas);
+  if (paginaActual !== primera) { paginaActual = primera; cerrarCampo(); }
+  modoTachar(true);
+  avisar((nuevas === 1 ? '1 coincidencia marcada' : nuevas + ' coincidencias marcadas') + ' en '
+    + (hojas.size === 1 ? '1 hoja' : hojas.size + ' hojas') + '. Revísalas y pulsa «Tachar».', 'bien');
+}
+
+/* arrastrar para marcar una zona */
+let arrastre = null;
+$('#renglones').addEventListener('pointerdown', (ev) => {
+  if (!tachando || ev.button !== 0) return;
+  ev.preventDefault();
+  const caja = ev.currentTarget.getBoundingClientRect();
+  const x = (ev.clientX - caja.left) / escala, y = (ev.clientY - caja.top) / escala;
+  const d = document.createElement('div');
+  d.className = 'tacha tacha-nueva';
+  ev.currentTarget.appendChild(d);
+  arrastre = { x, y, d, caja };
+  ev.currentTarget.setPointerCapture(ev.pointerId);
+});
+$('#renglones').addEventListener('pointermove', (ev) => {
+  if (!arrastre) return;
+  const x = (ev.clientX - arrastre.caja.left) / escala, y = (ev.clientY - arrastre.caja.top) / escala;
+  const d = arrastre.d;
+  d.style.left = (Math.min(x, arrastre.x) * escala) + 'px';
+  d.style.top = (Math.min(y, arrastre.y) * escala) + 'px';
+  d.style.width = (Math.abs(x - arrastre.x) * escala) + 'px';
+  d.style.height = (Math.abs(y - arrastre.y) * escala) + 'px';
+});
+$('#renglones').addEventListener('pointerup', (ev) => {
+  if (!arrastre) return;
+  const a = arrastre;
+  arrastre = null;
+  a.d.remove();
+  const x = (ev.clientX - a.caja.left) / escala, y = (ev.clientY - a.caja.top) / escala;
+  const pagina = doc.loadPage(paginaActual);
+  const lim = pagina.getBounds();
+  const caja = [Math.max(0, Math.min(x, a.x)), Math.max(0, Math.min(y, a.y)),
+                Math.min(lim[2] - lim[0], Math.max(x, a.x)), Math.min(lim[3] - lim[1], Math.max(y, a.y))];
+  // un clic sin arrastrar no marca nada: no se tacha media hoja sin querer
+  if (caja[2] - caja[0] < 3 || caja[3] - caja[1] < 3) return;
+  tachas.push({ hoja: paginaActual, caja });
+  pintarTachas();
+});
+
+$('#btnTachar').addEventListener('click', () => modoTachar(!tachando));
+$('#btnTacharAplicar').addEventListener('click', tacharPendientes);
+$('#btnTacharQuitar').addEventListener('click', () => { tachas = []; pintarTachas(); });
+$('#btnTacharTodas').addEventListener('click', tacharCoincidencias);
 
 function pintarCambios() {
   const lista = $('#cambios');
@@ -2429,6 +2792,16 @@ function pintarCambios() {
       + (c.sobreFoto ? ' · sobre la foto' : '')
       + (c.tipografia ? ' · escrito en ' + c.tipografia
          : c.propia ? ' · con la letra del documento' : '');
+    if (c.tachado) {
+      donde.textContent = 'Hoja ' + (c.hoja + 1) + ' · tachado';
+      const t = document.createElement('div');
+      t.className = 'despues';
+      t.textContent = (c.tachado === 1 ? '1 zona tachada' : c.tachado + ' zonas tachadas')
+        + ': lo que había se quitó del archivo.';
+      li.append(donde, t);
+      lista.appendChild(li);
+      return;
+    }
     const a = document.createElement('div'); a.className = 'antes';
     const b = document.createElement('div'); b.className = 'despues';
     if (c.antes) a.textContent = c.antes;
@@ -2634,6 +3007,7 @@ document.addEventListener('keydown', (ev) => {
   if ((ev.ctrlKey || ev.metaKey) && ev.key === 'z') { ev.preventDefault(); deshacer(); }
   if ((ev.ctrlKey || ev.metaKey) && ev.key === 'i') { ev.preventDefault(); modoInsertar(!insertando); }
   if (ev.key === 'Escape' && insertando) modoInsertar(false);
+  if (ev.key === 'Escape' && tachando) modoTachar(false);
 });
 
 const escena = $('#escena');

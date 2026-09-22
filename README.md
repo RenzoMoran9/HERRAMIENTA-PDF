@@ -46,6 +46,42 @@ En una hoja escaneada sin reconocer no hay dónde insertar: primero **Reconocer
 el texto**, o usa **Sello y marcas** en Grapa, que escribe encima sin tocar el
 escaneo.
 
+### Tachar un DNI, una cuenta o un nombre
+
+**Tachar** en la barra y arrastra sobre lo que hay que quitar; puedes marcar
+varias zonas, en varias hojas, y quitar una con su **×**. O escribe el dato en
+**Buscar** y pulsa **Tachar todas las coincidencias**: las marca todas, también
+en las hojas escaneadas ya reconocidas. Nada cambia hasta que pulsas **Tachar
+N zonas**, y entonces se hace todo de una vez: un solo **Deshacer** lo devuelve.
+
+No es un rectángulo negro puesto encima, que se levanta copiando y pegando.
+Tachar **quita del archivo** lo que hay debajo:
+
+- las **letras** que caen en la zona desaparecen del PDF;
+- en un **escaneo**, los píxeles de la foto en esa zona se borran de la imagen
+  misma, no se tapan;
+- el archivo se guarda **limpio**: sin eso, el trozo viejo de la hoja se queda
+  escondido dentro del PDF y cualquiera lo puede leer con otro programa;
+- en una hoja **reconocida**, lo tachado también sale del texto reconocido que
+  guarda la hoja, y no vuelve aunque después corrijas otro renglón;
+- donde estaba queda un recuadro negro, para que se vea que ahí había algo.
+
+La lista de cambios dice «2 zonas tachadas», pero no guarda qué se tachó: esa
+lista se guarda en el equipo con tu trabajo, y ahí tampoco debe quedar el dato.
+
+Qué no hace todavía:
+
+- **Tachar todas las coincidencias** busca el dato tal como lo escribes. Si en
+  el PDF va partido de otra manera («45 678 912» en vez de «45678912»), búscalo
+  así o márcalo a mano.
+- En un escaneo **sin reconocer** no hay texto que buscar: la zona se marca a
+  mano, arrastrando.
+- Solo quita lo que se ve en la hoja. Si el dato también va en el **nombre del
+  archivo**, en sus **propiedades** (título, autor) o en un **comentario**
+  pegado al PDF, eso no lo toca.
+- **Deshacer** devuelve lo tachado mientras el editor sigue abierto. Una vez
+  descargado o devuelto a Grapa, el archivo ya sale sin el dato.
+
 ### Hojas giradas
 
 Una hoja girada no es una hoja puesta de lado: es una hoja que por dentro está
@@ -281,6 +317,10 @@ node pruebas/girado.mjs       # corregir, borrar e insertar en hojas con
 node pruebas/guardado.mjs     # guardar el trabajo y recuperarlo al volver,
                               # por la web y desde el archivo suelto
 node pruebas/pasos.mjs        # los botones «−» y «+» del tamaño
+node pruebas/hacer-tachar.mjs # rehace la declaración inventada de tachar.pdf
+node pruebas/tachar.mjs       # tachar de verdad: el DNI fuera del texto, de
+                              # dentro del archivo y de la foto, también en
+                              # escaneos reconocidos y en hojas giradas
 node pruebas/todas.mjs        # todas, una detrás de otra
 node pruebas/corregir-escaneo.mjs   # corregir un renglón de una foto: comprueba
                                     # que la FOTO también cambia, volviéndola a
