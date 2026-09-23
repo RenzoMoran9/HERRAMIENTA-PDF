@@ -687,6 +687,8 @@ function estrenarDocumento(bytes, comoSeLlama) {
   $('#btnDescargar').disabled = false;
   $('#btnInsertar').disabled = false;
   $('#btnTachar').disabled = false;
+  // con otro documento no queda nada que deshacer del anterior
+  $('#btnDeshacer').disabled = true;
   tachas = [];
   $('#recuperar').hidden = true;
   descargado = true;
@@ -1957,6 +1959,15 @@ async function reconocerTodas() {
     }
     pintarAvance(faltan.length, 0);
   } catch (e) {
+    // lo ya leído (o enderezado) se queda, pero con su paso de deshacer: si
+    // no, un fallo a media lectura dejaba cambios que no se podían quitar
+    if (bytesActuales !== respaldo) {
+      pila.push({ bytes: respaldo, cambios: cambios.slice() });
+      $('#btnDeshacer').disabled = false;
+      descargado = false;
+      apuntarTrabajo();
+      dibujar();
+    }
     cargando(false);
     throw e;
   }
@@ -1989,7 +2000,9 @@ async function hacerBuscableParaGrapa() {
     avisar('Detenido. No se devolvió nada a Grapa.', '');
     return;
   }
-  devolver({ tarea: 'buscable', leidas: res.leidas, vacias: res.vacias, total: res.total });
+  // la pestaña se cierra sola: lo que habría dicho el aviso lo dice Grapa
+  devolver({ tarea: 'buscable', leidas: res.leidas, vacias: res.vacias, total: res.total,
+             enderezadas: res.enderezadas, corregidos: res.corregidos });
   avisar(`Listo: ${res.leidas} hoja(s) ya se pueden buscar. Vuelve a la pestaña de Grapa.`, 'bien');
   if (!res.detenido) setTimeout(() => { try { window.close(); } catch (e) {} }, 1500);
 }

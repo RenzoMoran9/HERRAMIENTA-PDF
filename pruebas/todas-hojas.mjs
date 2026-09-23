@@ -112,6 +112,34 @@ await pag.waitForTimeout(800);
 pl = await porLeer();
 ok('un solo Deshacer devuelve las 2 hojas leídas de golpe', /2 hojas escaneadas sin leer/.test(pl.texto), pl);
 
+console.log('\n--- si algo falla a media lectura ---');
+// se vuelve a abrir y se hace fallar la lectura de la segunda hoja
+await pag.setInputFiles('#archivo', ORIGEN);
+await pag.waitForSelector('#cartelEscaneo:not([hidden])', { timeout: 20000 });
+ok('al abrir otro documento, Deshacer empieza apagado', !(await pag.isEnabled('#btnDeshacer')));
+await pag.evaluate(() => {
+  const original = HTMLCanvasElement.prototype.toBlob;
+  let veces = 0;
+  HTMLCanvasElement.prototype.toBlob = function (...a) {
+    if (++veces === 2) throw new Error('fallo provocado por la prueba');
+    return original.apply(this, a);
+  };
+  window.__deshacerToBlob = () => { HTMLCanvasElement.prototype.toBlob = original; };
+});
+const antesFallo = fallos.length;
+await pag.click('#btnReconocerTodas');
+await pag.waitForFunction(() => /No se pudo reconocer/.test(document.querySelector('#avisos').textContent), null, { timeout: 180000 });
+await pag.evaluate(() => window.__deshacerToBlob());
+await pag.waitForTimeout(500);
+pl = await porLeer();
+ok('la hoja que ya se leyó se queda leída', /2 hojas escaneadas sin leer/.test(pl.texto) || /las 2 hojas/.test(await pag.textContent('#btnReconocerTodas')), pl);
+ok('y se puede deshacer', await pag.isEnabled('#btnDeshacer'));
+await pag.click('#btnDeshacer');
+await pag.waitForTimeout(800);
+ok('Deshacer la deja como llegó: otra vez 3 sin leer', /las 3 hojas/.test(await pag.textContent('#btnReconocerTodas')),
+   await pag.textContent('#btnReconocerTodas'));
+fallos.splice(antesFallo);   // el error provocado no cuenta
+
 ok('sin errores en la página', fallos.length === 0, fallos);
 await nav.close(); srv.kill();
 console.log(malas ? `\n${malas} FALLA(S)` : '\nTodo en orden');
