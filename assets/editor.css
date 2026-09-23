@@ -89,7 +89,7 @@ svg[class^="ico"], svg[class*=" ico"]{
   overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
   font-size:14px;
 }
-.doc-info span{ font-size:12px; color:var(--texto-3); }
+.doc-info span{ font-size:12px; color:var(--texto-3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 
 .barra-acciones{ margin-left:auto; display:flex; align-items:center; gap:8px; }
 
@@ -362,3 +362,23 @@ svg[class^="ico"], svg[class*=" ico"]{
 .por-leer .pista{ margin:0 0 8px; }
 .cartel-botones{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:2px 0 12px; }
 .cartel-botones .btn{ width:auto; margin:0; }
+
+/* la barrita para ajustar la letra a mano, encima del campo */
+.campo-ajustes{
+  position:absolute; z-index:6; display:flex; align-items:center; gap:3px;
+  padding:3px 5px; border-radius:7px; background:var(--fondo-2); color:var(--texto);
+  border:1px solid var(--borde); box-shadow:var(--sombra-fuerte); font:12px/1 system-ui, sans-serif;
+  white-space:nowrap;
+}
+.campo-ajustes button{
+  min-width:24px; height:24px; padding:0 5px; border-radius:5px; cursor:pointer;
+  border:1px solid transparent; background:none; color:inherit; font:600 12px/1 system-ui, sans-serif;
+}
+.campo-ajustes button:hover{ background:var(--fondo-3, rgba(127,127,127,.12)); }
+.campo-ajustes .campo-negrita{ font-weight:900; }
+.campo-ajustes button.activo{ border-color:var(--acento); background:rgba(127,127,127,.12); }
+.campo-ajustes .campo-tam{ min-width:44px; text-align:center; font-variant-numeric:tabular-nums; color:var(--texto-2); }
+.campo-ajustes .campo-sep{ width:1px; height:16px; background:var(--borde); margin:0 3px; }
+.campo-ajustes .campo-color{ min-width:18px; width:18px; height:18px; padding:0; border-radius:50%; border:2px solid var(--fondo-2); box-shadow:0 0 0 1px var(--borde); }
+.campo-ajustes .campo-color.activo{ box-shadow:0 0 0 2px var(--acento); }
+.campo-ajustes .campo-color.campo-orig{ border-style:dashed; border-color:var(--texto-3); }

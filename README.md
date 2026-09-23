@@ -41,6 +41,21 @@ Sirve también para mover un renglón **sin cambiarle el texto**, o uno que ya
 corregiste: pulsa sobre él, muévelo y `Enter`. En una hoja escaneada, lo viejo
 sigue tapado en su sitio y el texto nuevo va donde lo pongas.
 
+### Tamaño, negrita y color a mano
+
+El editor copia la letra del renglón, pero a veces la medición se equivoca:
+una firma que roza el renglón lo hace parecer negrita, o un sello lo tiñe.
+Encima del campo hay una barrita para corregirlo viendo ya cómo queda:
+
+- **A−** y **A+**: medio punto menos o más; en medio se ve el tamaño.
+- **N**: negrita sí o no (también `Ctrl` + `B`).
+- **Colores**: el de antes (círculo punteado), negro, azul y rojo.
+
+Con `Enter` se aplica al renglón entero, en una hoja de texto y en una
+escaneada (ahí también cambia lo que se dibuja sobre la foto), y al escribir
+con **Insertar**. Sirve igual sin cambiar el texto. En la lista de cambios
+sale «letra ajustada», y **Deshacer** lo quita.
+
 ### Borrar un renglón
 
 Pulsa el renglón, **déjalo vacío** y `Enter`. No se tapa con blanco: en una hoja
@@ -399,6 +414,8 @@ node pruebas/sucio.mjs        # leer hojas torcidas, grises y con motitas:
 node pruebas/hacer-errores.mjs # rehace las hojas inventadas con N° y S/
 node pruebas/errores.mjs      # corregir N° y S/ mal leídos, frase a frase y
                               # en un documento, sin tocar nunca una cifra
+node pruebas/ajustes.mjs      # tamaño, negrita y color a mano, en hoja de
+                              # texto, escaneada y al insertar
 node pruebas/todas.mjs        # todas, una detrás de otra
 node pruebas/corregir-escaneo.mjs   # corregir un renglón de una foto: comprueba
                                     # que la FOTO también cambia, volviéndola a

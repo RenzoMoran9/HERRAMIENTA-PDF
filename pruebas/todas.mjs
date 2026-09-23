@@ -6,7 +6,7 @@ import path from 'node:path';
 const RAIZ = path.resolve(path.dirname(new URL(import.meta.url).pathname));
 const suites = process.argv.slice(2).length ? process.argv.slice(2) : [
   'editar', 'suelto', 'subconjunto', 'escaneo', 'reconocer', 'corregir-escaneo',
-  'suelto-ocr', 'buscar', 'pasos', 'borrar-insertar', 'guardado', 'girado', 'firmado', 'solicitud', 'tipografia', 'cuadro', 'tachar', 'natural', 'todas-hojas', 'sucio', 'errores',
+  'suelto-ocr', 'buscar', 'pasos', 'borrar-insertar', 'guardado', 'girado', 'firmado', 'solicitud', 'tipografia', 'cuadro', 'tachar', 'natural', 'todas-hojas', 'sucio', 'errores', 'ajustes',
 ];
 // El archivo suelto se vuelve a armar antes de nada: dos de las pruebas lo
 // abren desde el disco, y probar una versión vieja no prueba nada.

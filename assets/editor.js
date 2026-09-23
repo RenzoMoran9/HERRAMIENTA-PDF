@@ -814,7 +814,7 @@ function pintarRenglones() {
 /* ---------- el campo para escribir ---------- */
 let campoAbierto = null;
 function cerrarCampo() {
-  $$('.campo-asa').forEach((n) => n.remove());
+  $$('.campo-asa, .campo-ajustes').forEach((n) => n.remove());
   if (campoAbierto) { campoAbierto.remove(); campoAbierto = null; }
   const a = document.querySelector('.campo-ayuda');
   if (a) a.remove();
@@ -888,35 +888,104 @@ function papelJunto(caja) {
   return 'rgb(' + m.join(',') + ')';
 }
 
+/* Los colores que se ofrecen a mano: los de casi cualquier documento. Una
+   rueda de colores daría para elegir cualquiera, pero lo que se busca aquí
+   es igualar el de al lado o poner el negro o el azul de siempre, y eso va
+   mejor con un clic. */
+const COLORES_A_MANO = [
+  { nombre: 'Negro', rgb: [0, 0, 0] },
+  { nombre: 'Azul', rgb: [0.06, 0.2, 0.62] },
+  { nombre: 'Rojo', rgb: [0.72, 0.1, 0.1] },
+];
+const aCss = (c) => 'rgb(' + c.slice(0, 3).map((v) => Math.round(Math.max(0, Math.min(1, v)) * 255)).join(',') + ')';
+
 /**
  * Pone un campo con la letra del documento sobre la hoja. `donde` lleva la
- * caja que tapa (lo que había) y la línea base; `alListo(texto, desp)`
- * recibe lo escrito y cuánto se movió, en puntos.
+ * caja que tapa (lo que había) y la línea base; `alListo(texto, desp,
+ * ajustes)` recibe lo escrito, cuánto se movió (en puntos) y lo que se
+ * cambió a mano de la letra —{ tam, negrita, tinta }, solo lo tocado—, o
+ * null si no se tocó nada.
+ *
+ * La medición de la letra acierta casi siempre, pero no siempre: una firma
+ * que roza el renglón lo hace parecer negrita, un sello lo tiñe de azul.
+ * Por eso encima del campo va una barrita para corregirlo a mano —tamaño,
+ * negrita y color— viendo ya cómo queda.
  */
 function campoSobreHoja(donde, letra, valor, ayudaTexto, alListo, alSalir) {
   cerrarCampo();
   const capa = $('#renglones');
-  const tamPx = letra.tam * escala;
   const desp = { dx: 0, dy: 0 };
+  const ajuste = { tam: letra.tam, negrita: !!letra.negrita, tinta: null };
+  const tocado = {};
+  let tamPx = ajuste.tam * escala;
 
   const campo = document.createElement('input');
   campo.className = 'campo';
   campo.type = 'text';
   campo.value = valor;
   campo.spellcheck = false;
-  const fuente = (letra.cursiva ? 'italic ' : '') + (letra.negrita ? 'bold ' : '') + tamPx.toFixed(2) + 'px ' + letra.familia;
-  campo.style.font = fuente;
-  campo.style.color = letra.color;
   campo.style.background = donde.papel;
-  campo.style.height = (tamPx * 1.2) + 'px';
-  campo.style.lineHeight = (tamPx * 1.2) + 'px';
-
   const medir = document.createElement('canvas').getContext('2d');
-  medir.font = fuente;
   const anchoMin = donde.tapa ? (donde.tapa[2] - donde.x) * escala : 0;
   const ajustarAncho = () => {
     campo.style.width = Math.max(anchoMin, medir.measureText(campo.value || ' ').width + tamPx * 0.6, 40) + 'px';
   };
+  const ponerLetra = () => {
+    tamPx = ajuste.tam * escala;
+    const fuente = (letra.cursiva ? 'italic ' : '') + (ajuste.negrita ? 'bold ' : '') + tamPx.toFixed(2) + 'px ' + letra.familia;
+    campo.style.font = fuente;
+    campo.style.color = ajuste.tinta ? aCss(ajuste.tinta) : letra.color;
+    campo.style.height = (tamPx * 1.2) + 'px';
+    campo.style.lineHeight = (tamPx * 1.2) + 'px';
+    medir.font = fuente;
+  };
+  ponerLetra();
+
+  // la barrita: A− A+ · N · colores
+  const barra = document.createElement('div');
+  barra.className = 'campo-ajustes';
+  const boton = (texto, titulo, hacer, clase) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = texto;
+    b.title = titulo;
+    if (clase) b.className = clase;
+    // pulsarlo no le quita el foco al campo: así no se cierra
+    b.addEventListener('pointerdown', (ev) => ev.preventDefault());
+    b.addEventListener('click', () => { hacer(); campo.focus(); });
+    barra.appendChild(b);
+    return b;
+  };
+  const tamTexto = document.createElement('span');
+  tamTexto.className = 'campo-tam';
+  const pintarBarra = () => {
+    tamTexto.textContent = ajuste.tam.toFixed(1).replace('.', ',') + ' pt';
+    bNegrita.classList.toggle('activo', ajuste.negrita);
+    barra.querySelectorAll('.campo-color').forEach((b) => b.classList.toggle('activo',
+      b.dataset.i === (ajuste.tinta ? String(COLORES_A_MANO.findIndex((c) => c.rgb === ajuste.tinta)) : 'orig')));
+  };
+  const cambiar = (que, valor2) => {
+    ajuste[que] = valor2;
+    tocado[que] = true;
+    ponerLetra(); ajustarAncho(); colocar(); pintarBarra();
+  };
+  // de medio punto en medio punto, desde lo medido: cada clic mueve lo mismo
+  boton('A−', 'Letra más chica (medio punto)', () => cambiar('tam', Math.max(4, Math.round((ajuste.tam - 0.5) * 100) / 100)), 'campo-menos');
+  barra.appendChild(tamTexto);
+  boton('A+', 'Letra más grande (medio punto)', () => cambiar('tam', Math.min(72, Math.round((ajuste.tam + 0.5) * 100) / 100)), 'campo-mas');
+  const bNegrita = boton('N', 'Negrita (Ctrl+B)', () => cambiar('negrita', !ajuste.negrita), 'campo-negrita');
+  const sep = document.createElement('span');
+  sep.className = 'campo-sep';
+  barra.appendChild(sep);
+  const bOrig = boton('', 'Como estaba: el color medido del renglón', () => { ajuste.tinta = null; delete tocado.tinta; ponerLetra(); pintarBarra(); }, 'campo-color campo-orig');
+  bOrig.dataset.i = 'orig';
+  bOrig.style.background = letra.color;
+  COLORES_A_MANO.forEach((c, i) => {
+    const b = boton('', c.nombre, () => cambiar('tinta', c.rgb), 'campo-color');
+    b.dataset.i = String(i);
+    b.style.background = aCss(c.rgb);
+  });
+  pintarBarra();
 
   const asa = document.createElement('div');
   asa.className = 'campo-asa';
@@ -931,6 +1000,8 @@ function campoSobreHoja(donde, letra, valor, ayudaTexto, alListo, alSalir) {
     const x = (donde.x + desp.dx) * escala, y = (donde.base + desp.dy) * escala;
     campo.style.left = x + 'px';
     campo.style.top = (y - tamPx) + 'px';
+    barra.style.left = x + 'px';
+    barra.style.top = (y - tamPx - 34) + 'px';
     asa.style.left = (x - 18) + 'px';
     asa.style.top = (y - tamPx) + 'px';
     asa.style.height = (tamPx * 1.2) + 'px';
@@ -956,6 +1027,11 @@ function campoSobreHoja(donde, letra, valor, ayudaTexto, alListo, alSalir) {
 
   campo.addEventListener('input', ajustarAncho);
   campo.addEventListener('keydown', (ev) => {
+    if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'b') {
+      ev.preventDefault();
+      cambiar('negrita', !ajuste.negrita);
+      return;
+    }
     if (ev.altKey && ev.key.startsWith('Arrow')) {
       ev.preventDefault();
       const paso = ev.shiftKey ? 2 : 0.5;
@@ -970,8 +1046,13 @@ function campoSobreHoja(donde, letra, valor, ayudaTexto, alListo, alSalir) {
       ev.preventDefault();
       const v = campo.value;
       const d = { dx: desp.dx, dy: desp.dy };
+      // solo lo que se tocó y quedó distinto de lo medido
+      const aj = {};
+      if (tocado.tam && Math.abs(ajuste.tam - letra.tam) > 0.01) aj.tam = ajuste.tam;
+      if (tocado.negrita && ajuste.negrita !== !!letra.negrita) aj.negrita = ajuste.negrita;
+      if (tocado.tinta && ajuste.tinta) aj.tinta = ajuste.tinta.slice();
       cerrarCampo();
-      alListo(v, d);
+      alListo(v, d, Object.keys(aj).length ? aj : null);
     }
     if (ev.key === 'Escape') { ev.preventDefault(); cerrarCampo(); if (alSalir) alSalir(); }
   });
@@ -981,6 +1062,7 @@ function campoSobreHoja(donde, letra, valor, ayudaTexto, alListo, alSalir) {
   ajustarAncho();
   capa.appendChild(campo);
   capa.appendChild(asa);
+  capa.appendChild(barra);
   capa.appendChild(ayuda);
   campoAbierto = campo;
   campo.focus();
@@ -995,7 +1077,7 @@ function editar(indice, valorInicial) {
     letra, valorInicial === undefined ? r.texto : valorInicial,
     (r.deEscaneo ? 'Se tapará con el papel y se escribirá encima · ' : '')
       + 'Enter: poner · Esc: dejar · vacío + Enter: borrar · ⠇ o Alt + flechas: mover',
-    (v, desp) => aplicar(indice, v, desp));
+    (v, desp, aj) => aplicar(indice, v, desp, aj));
   campo.select();
 }
 
@@ -2244,23 +2326,24 @@ function aplicarCapa(pagina, modelo, marco) {
  * llama. Así «reemplazar todas» puede encadenar veinte cambios y dejar un
  * solo paso que deshacer, en vez de veinte.
  */
-function cambiarRenglon(indice, textoNuevo, desp) {
+function cambiarRenglon(indice, textoNuevo, desp, aj) {
   return renglones[indice].deEscaneo
-    ? reescribirEnEscaneo(indice, textoNuevo, desp)
-    : reescribir(indice, textoNuevo, desp);
+    ? reescribirEnEscaneo(indice, textoNuevo, desp, aj)
+    : reescribir(indice, textoNuevo, desp, aj);
 }
 
 /* ---------- el cambio de verdad ---------- */
-function aplicar(indice, textoNuevo, desp) {
+function aplicar(indice, textoNuevo, desp, aj) {
   const r = renglones[indice];
   const movido = !!(desp && textoNuevo && (desp.dx || desp.dy));
-  if (textoNuevo === r.texto && !movido) return;
+  const ajustado = !!(aj && textoNuevo);
+  if (textoNuevo === r.texto && !movido && !ajustado) return;
   // sin texto, el cambio es borrar el renglón: se quita del archivo de verdad
-  hacerCambio(() => cambiarRenglon(indice, textoNuevo, movido ? desp : null), r.texto, textoNuevo);
+  hacerCambio(() => cambiarRenglon(indice, textoNuevo, movido ? desp : null, ajustado ? aj : null), r.texto, textoNuevo);
 }
 
-function insertar(x, y, texto) {
-  hacerCambio(() => insertarRenglon(x, y, texto), '', texto);
+function insertar(x, y, texto, aj) {
+  hacerCambio(() => insertarRenglon(x, y, texto, aj), '', texto);
 }
 
 /**
@@ -2289,7 +2372,7 @@ function hacerCambio(accion, antes, despues) {
         encogido: resultado.encogido, tipografia: resultado.tipografia,
         sobreFoto: resultado.sobreFoto, borrado: resultado.borrado,
         insertado: resultado.insertado, propia: resultado.propia,
-        movido: resultado.movido,
+        movido: resultado.movido, ajustado: resultado.ajustado,
       });
       $('#btnDeshacer').disabled = false;
       cargando(false);
@@ -2308,6 +2391,7 @@ function hacerCambio(accion, antes, despues) {
           : '');
       avisar((resultado.borrado ? 'Renglón borrado.'
         : resultado.movido && antes === despues ? 'Movido.'
+        : resultado.ajustado && antes === despues ? 'Letra ajustada.'
         : resultado.insertado
           ? 'Escrito' + (resultado.tipografia ? ' en ' + resultado.tipografia : '') + '.'
           : (resultado.sobreFoto ? 'Cambiado sobre la foto' : 'Cambiado')
@@ -2326,7 +2410,7 @@ function hacerCambio(accion, antes, despues) {
    Se cambia el modelo y se vuelve a escribir la capa entera. No se redacta
    nada y no se toca la foto original: lo que tapa es un recuadro nuestro,
    del color del papel de ese renglón. */
-function reescribirEnEscaneo(indice, textoNuevo, desp) {
+function reescribirEnEscaneo(indice, textoNuevo, desp, aj) {
   const r = renglones[indice];
   const pagina = doc.loadPage(paginaActual);
   const marco = marcoDe(pagina);
@@ -2355,6 +2439,14 @@ function reescribirEnEscaneo(indice, textoNuevo, desp) {
     fila.hueco = Math.max(med.ancho, fila.x1 - fila.x0);
     fila.suavidad = med.suavidad;
     if (med.parche) parchesPapel.set(paginaActual + ':' + r.enModelo, { p: med.parche, s: med.suavidad });
+  }
+  // lo ajustado a mano manda sobre lo medido; el parche de papel se vuelve a
+  // componer con esa letra, así que también cambia en la foto
+  const letraAntes = { tam: fila.tam, negrita: fila.negrita, tinta: fila.tinta };
+  if (aj) {
+    if (aj.tam != null) fila.tam = aj.tam;
+    if (aj.negrita != null) fila.negrita = aj.negrita;
+    if (aj.tinta) fila.tinta = aj.tinta;
   }
   // moverlo a mano: el texto va donde se dejó; el parche sigue tapando el
   // sitio de antes, que es donde estaba lo viejo
@@ -2386,6 +2478,7 @@ function reescribirEnEscaneo(indice, textoNuevo, desp) {
   const volver = (motivo) => {
     fila.t = antes; fila.editado = eraEditado; fila.borrado = eraBorrado;
     fila.x = xAntes; fila.base = baseAntes;
+    Object.assign(fila, letraAntes);
     return { ok: false, motivo };
   };
 
@@ -2399,7 +2492,7 @@ function reescribirEnEscaneo(indice, textoNuevo, desp) {
   bytesActuales = salida;
   abrirBytes(salida, nombre);
   return { ok: true, sobreFoto: true, borrado: !textoNuevo, cambiadas: queda.perdidas,
-           movido: !!(desp && (desp.dx || desp.dy)) };
+           movido: !!(desp && (desp.dx || desp.dy)), ajustado: !!aj };
 }
 
 
@@ -2458,7 +2551,7 @@ function repartirRenglon(r, textoNuevo) {
   return piezas;
 }
 
-function reescribir(indice, textoNuevo, desp) {
+function reescribir(indice, textoNuevo, desp, aj) {
   const r = renglones[indice];
   const dx = desp ? desp.dx : 0, dy = desp ? desp.dy : 0;
   const pagina = doc.loadPage(paginaActual);
@@ -2477,6 +2570,19 @@ function reescribir(indice, textoNuevo, desp) {
   const objPag = pagina.getObject();
   const cacheFuentes = new Map();
   const piezas = textoNuevo ? repartirRenglon(r, textoNuevo) : [];
+  // lo ajustado a mano va para el renglón entero. La negrita no se puede
+  // sacar de la tipografía del documento si esta no la trae: se pide la de
+  // serie de su misma familia, con o sin negrita.
+  if (aj) {
+    for (const t of piezas) {
+      if (aj.tam != null) t.size = aj.tam;
+      if (aj.tinta) t.color = aj.tinta;
+      if (aj.negrita != null && aj.negrita !== !!(t.rasgos || {}).negrita) {
+        t.rasgos = Object.assign({}, t.rasgos, { negrita: aj.negrita });
+        t.fuente = nombreDeSerie(familiaDe(t.fuente, t.rasgos), aj.negrita, !!t.rasgos.cursiva);
+      }
+    }
+  }
   for (const t of piezas) {
     t.f = conQueEscribir(pagina, objPag, t.fuente, t.rasgos, t.texto, t.size, cacheFuentes);
   }
@@ -2516,7 +2622,13 @@ function reescribir(indice, textoNuevo, desp) {
   // corre lo de detrás, que es lo que hace cualquier editor.
   const cambiada = piezas.find((t) => t.medio);
   let tz = 100, encogido = 0, corrimiento = 0;
-  if (cambiada) {
+  if (aj) {
+    // con otra letra los trozos ya no miden lo que medían: van uno detrás
+    // de otro desde donde empezaba el renglón, y no se aprietan (si se
+    // agranda la letra a mano, es para que se vea más grande)
+    let cursor = piezas.length ? piezas[0].x : 0;
+    for (const t of piezas) { t.x = cursor; t.sufijo = false; t.medio = false; cursor += t.f.ancho; }
+  } else if (cambiada) {
     const hueco = Math.max(0, cambiada.hueco);
     if (hueco > 0.5 && cambiada.f.ancho > hueco * 1.01) {
       tz = Math.max(70, (hueco / cambiada.f.ancho) * 100);
@@ -2578,7 +2690,7 @@ function reescribir(indice, textoNuevo, desp) {
   bytesActuales = salida;
   abrirBytes(salida, nombre);
   const dueña = cambiada || piezas[0];
-  return { ok: true, encogido, desvio, movido: !!(dx || dy),
+  return { ok: true, encogido, desvio, movido: !!(dx || dy), ajustado: !!aj,
            cambiadas: [...new Set(piezas.flatMap((t) => t.f.perdidas))],
            propia: !!(dueña && dueña.f.propia),
            tipografia: dueña && dueña.f.sustituida ? dueña.f.nombre : '',
@@ -2617,24 +2729,32 @@ function letraParaInsertar(x, y) {
   return { cerca, tam, color, elegida, negrita: !!(cerca && cerca.rasgos && cerca.rasgos.negrita) };
 }
 
-function insertarRenglon(x, y, texto) {
+function insertarRenglon(x, y, texto, aj) {
   const pagina = doc.loadPage(paginaActual);
   const marco = marcoDe(pagina);
   const raro = giroRaro(marco);
   if (raro) return { ok: false, motivo: raro };
   const modelo = modeloDe(pagina);
   return modelo && modelo.ocr !== false
-    ? insertarEnEscaneo(pagina, modelo, marco, x, y, texto)
-    : insertarEnTexto(pagina, marco, x, y, texto);
+    ? insertarEnEscaneo(pagina, modelo, marco, x, y, texto, aj)
+    : insertarEnTexto(pagina, marco, x, y, texto, aj);
 }
 
-function insertarEnTexto(pagina, marco, x, y, texto) {
-  const { tam, color, cerca } = letraParaInsertar(x, y);
+function insertarEnTexto(pagina, marco, x, y, texto, aj) {
+  const l = letraParaInsertar(x, y);
+  const cerca = l.cerca;
+  const tam = aj && aj.tam != null ? aj.tam : l.tam;
+  const color = aj && aj.tinta ? aj.tinta : l.color;
+  let fuente = cerca ? cerca.fuente : 'Helvetica';
+  let rasgos = cerca ? cerca.rasgos : null;
+  if (aj && aj.negrita != null && aj.negrita !== !!(rasgos || {}).negrita) {
+    rasgos = Object.assign({}, rasgos, { negrita: aj.negrita });
+    fuente = nombreDeSerie(familiaDe(fuente, rasgos), aj.negrita, !!rasgos.cursiva);
+  }
   const objPag = pagina.getObject();
   envolverCerrado(objPag);
 
-  const f = conQueEscribir(pagina, objPag, cerca ? cerca.fuente : 'Helvetica',
-                           cerca ? cerca.rasgos : null, texto, tam);
+  const f = conQueEscribir(pagina, objPag, fuente, rasgos, texto, tam);
 
   const [cr, cg, cb] = color;
   const buf = new Buffer();
@@ -2677,8 +2797,11 @@ function insertarEnTexto(pagina, marco, x, y, texto) {
            tipografia: f.sustituida ? f.nombre : '', faltan: f.faltan };
 }
 
-function insertarEnEscaneo(pagina, modelo, marco, x, y, texto) {
-  const { tam, color, negrita } = letraParaInsertar(x, y);
+function insertarEnEscaneo(pagina, modelo, marco, x, y, texto, aj) {
+  const l = letraParaInsertar(x, y);
+  const tam = aj && aj.tam != null ? aj.tam : l.tam;
+  const color = aj && aj.tinta ? aj.tinta : l.color;
+  const negrita = aj && aj.negrita != null ? aj.negrita : l.negrita;
   const met = metricaDe(texto);
   const ancho = Math.max(2, medirAncho(new Font(negrita ? 'Helvetica-Bold' : 'Helvetica'), texto, tam));
   modelo.renglones.push({
@@ -2949,7 +3072,7 @@ function campoInsertar(xHoja, yHoja) {
     letra, '',
     'Se escribirá en ' + (cerca ? sinPrefijo(cerca.fuente) : l.elegida.nombre) + ' de ' + l.tam.toFixed(1) + ' pt'
       + ' · Enter: poner · Esc: dejar · ⠇ o Alt + flechas: mover',
-    (v, desp) => { modoInsertar(false); if (v.trim()) insertar(xHoja + desp.dx, yHoja + desp.dy, v); },
+    (v, desp, aj) => { modoInsertar(false); if (v.trim()) insertar(xHoja + desp.dx, yHoja + desp.dy, v, aj); },
     () => modoInsertar(false));
   campo.placeholder = 'Escribe aquí…';
 }
@@ -3324,6 +3447,7 @@ function pintarCambios() {
       + (c.encogido ? ' · ajustado al ' + c.encogido + ' %' : '')
       + (c.sobreFoto ? ' · sobre la foto' : '')
       + (c.movido ? ' · movido' : '')
+      + (c.ajustado ? ' · letra ajustada' : '')
       + (c.tipografia ? ' · escrito en ' + c.tipografia
          : c.propia ? ' · con la letra del documento' : '');
     if (c.tachado) {
