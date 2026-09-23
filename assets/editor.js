@@ -1293,6 +1293,112 @@ function medirRenglon(pagina, caja) {
    el PDF pasa a poder buscarse y copiarse, también fuera de aquí. */
 const PPP_OCR = 200;
 
+/* ---------- la hoja torcida ----------
+
+   Un escaneo casi nunca entra derecho, y unos pocos grados bastan para que
+   el reconocimiento parta los renglones y confunda letras: los números
+   largos, como un RUC, son lo primero que se pierde. Antes de leer se mide
+   cuánto está torcida —como hace Grapa en «Revisar»: el giro con el que la
+   tinta se amontona en renglones más limpios— y, si lo está, se endereza la
+   hoja DE VERDAD en el documento. Así lo leído, lo que luego se corrija y
+   lo que se ve van derechos y a la vez. */
+const TORCIDA_MAXIMA = 8;     // grados: más que esto no es un escaneo torcido
+const TORCIDA_MINIMA = 0.4;   // grados: menos que esto no estorba al leer
+
+/** Cuántos grados hay que girar la hoja (a favor del reloj, como se ve)
+ *  para enderezarla. 0 si está derecha o si no hay renglones que mirar. */
+function medirTorcida(lienzo) {
+  const AN = lienzo.width, AL = lienzo.height;
+  const datos = lienzo.getContext('2d', { willReadFrequently: true }).getImageData(0, 0, AN, AL).data;
+  // a la mitad de resolución: sobra para medir y va cuatro veces más rápido
+  const W = AN >> 1, H = AL >> 1;
+  const lum = new Uint8Array(W * H);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const j = ((y * 2) * AN + x * 2) * 4;
+      lum[y * W + x] = (datos[j] * 299 + datos[j + 1] * 587 + datos[j + 2] * 114) / 1000;
+    }
+  }
+  // tinta: bastante más oscuro que el papel de su zona
+  const B = 24, bx = Math.ceil(W / B), by = Math.ceil(H / B);
+  const papel = new Uint8Array(bx * by);
+  for (let cy = 0; cy < by; cy++) {
+    for (let cx = 0; cx < bx; cx++) {
+      const m = [];
+      for (let y = cy * B; y < Math.min(H, (cy + 1) * B); y += 2) for (let x = cx * B; x < Math.min(W, (cx + 1) * B); x += 2) m.push(lum[y * W + x]);
+      m.sort((a, b) => a - b);
+      papel[cy * bx + cx] = m.length ? m[Math.floor(m.length * 0.8)] : 255;
+    }
+  }
+  const mx = Math.round(W * 0.04), my = Math.round(H * 0.04);
+  const xs = [], ys = [];
+  for (let y = my; y < H - my; y++) {
+    for (let x = mx; x < W - mx; x++) {
+      const v = lum[y * W + x];
+      if (v < 170 && v < papel[((y / B) | 0) * bx + ((x / B) | 0)] * 0.6) { xs.push(x - W / 2); ys.push(y - H / 2); }
+    }
+  }
+  if (xs.length < 400) return 0;
+  const paso = Math.max(1, Math.ceil(xs.length / 90000));
+  const px = [], py = [];
+  for (let i = 0; i < xs.length; i += paso) { px.push(xs[i]); py.push(ys[i]); }
+  // cuán limpios salen los renglones girando la tinta «g» grados
+  const nitidez = (g) => {
+    const r = (g * Math.PI) / 180, co = Math.cos(r), si = Math.sin(r);
+    const h = new Map();
+    let min = Infinity, max = -Infinity;
+    for (let i = 0; i < px.length; i++) {
+      const v = Math.floor((px[i] * si + py[i] * co) / 2);
+      h.set(v, (h.get(v) || 0) + 1);
+      if (v < min) min = v;
+      if (v > max) max = v;
+    }
+    let s2 = 0;
+    for (const n of h.values()) s2 += n * n;
+    return (s2 * (max - min + 1)) / (px.length * px.length);
+  };
+  let mejor = 0, valor = -1;
+  for (let g = -TORCIDA_MAXIMA; g <= TORCIDA_MAXIMA + 1e-9; g += 0.5) {
+    const v = nitidez(g);
+    if (v > valor) { valor = v; mejor = g; }
+  }
+  const grueso = mejor;
+  for (let g = grueso - 0.45; g <= grueso + 0.45 + 1e-9; g += 0.05) {
+    const v = nitidez(g);
+    if (v > valor) { valor = v; mejor = g; }
+  }
+  mejor = Math.round(mejor * 20) / 20;
+  // si derecha se ve casi igual de limpia, no hay nada que enderezar
+  if (Math.abs(mejor) < TORCIDA_MINIMA || valor < nitidez(0) * 1.05) return 0;
+  return mejor;
+}
+
+/**
+ * Gira el contenido de la hoja «grados» a favor del reloj alrededor de su
+ * centro. Se envuelve lo que ya había en q…Q con un «cm»: la foto no se
+ * vuelve a dibujar, solo se gira, así que no pierde nada, y el texto que se
+ * ponga después va por fuera, derecho.
+ */
+function enderezarHoja(pagina, grados) {
+  const objPag = pagina.getObject();
+  const m = marcoDe(pagina);
+  const cx = (m.mx0 + m.mx1) / 2, cy = (m.my0 + m.my1) / 2;
+  // en el papel la y va hacia arriba: a favor del reloj es un ángulo negativo
+  const r = (-grados * Math.PI) / 180, co = Math.cos(r), si = Math.sin(r);
+  const abre = new Buffer();
+  abre.writeLine('q ' + [co, si, -si, co, cx - co * cx + si * cy, cy - si * cx - co * cy]
+    .map((v) => v.toFixed(5)).join(' ') + ' cm');
+  const cierra = new Buffer();
+  cierra.writeLine('Q');
+  const cont = objPag.get('Contents');
+  const arr = doc.newArray();
+  arr.push(doc.addStream(abre, {}));
+  if (cont.isArray()) { for (let i = 0; i < cont.length; i++) arr.push(cont.get(i)); } else arr.push(cont);
+  arr.push(doc.addStream(cierra, {}));
+  objPag.put('Contents', arr);
+  objPag.put('GrapaEnderezada', doc.newReal(grados));
+}
+
 /**
  * Limpia la hoja antes de leerla. Dos cosas estorban mucho al reconocimiento
  * y las dos salen en cualquier formato con cuadros:
@@ -1455,6 +1561,102 @@ function limpiarParaLeer(lienzo) {
     }
   }
 
+  /* 4. Fuera el gris. Un papel gris, amarillento o con sombra —más oscuro
+     hacia el lomo— deja la letra con poco contraste, y el reconocedor, que
+     separa tinta de papel con un solo corte para toda la hoja, se come
+     letras donde el papel es oscuro. Cada punto se compara con el papel de
+     SU zona (repartido suave entre zonas, para que no queden cuadros): el
+     papel pasa a blanco y la tinta queda negra, sea cual sea el gris.
+     Solo en la copia que se lee: la foto del documento no cambia. */
+  const papelEn = (x, y) => {
+    const fx = Math.min(bx - 1, Math.max(0, x / B - 0.5)), fy = Math.min(by - 1, Math.max(0, y / B - 0.5));
+    const x0 = fx | 0, y0 = fy | 0, x1 = Math.min(bx - 1, x0 + 1), y1 = Math.min(by - 1, y0 + 1);
+    const tx = fx - x0, ty = fy - y0;
+    const a = fondo[y0 * bx + x0] * (1 - tx) + fondo[y0 * bx + x1] * tx;
+    const b = fondo[y1 * bx + x0] * (1 - tx) + fondo[y1 * bx + x1] * tx;
+    return Math.max(40, a * (1 - ty) + b * ty);
+  };
+  const gris = new Uint8Array(an * al);
+  for (let y = 0; y < al; y++) {
+    for (let x = 0; x < an; x++) {
+      const i = y * an + x, j = i * 4;
+      const v = (d[j] * 299 + d[j + 1] * 587 + d[j + 2] * 114) / 1000;
+      // lo que llega al 90 % del papel ya es papel
+      gris[i] = Math.max(0, Math.min(255, Math.round((v / (papelEn(x, y) * 0.9)) * 255)));
+    }
+  }
+
+  /* 5. Fuera las motitas: el polvo del cristal y del papel sale como
+     puntitos que el reconocedor lee como comas, puntos, guiones o letras
+     sueltas. Se borra cada mancha pequeña que no tiene una LETRA al lado.
+     Un punto decimal, el de la «i», una coma o los dos puntos están pegados
+     a letras y se quedan; una mota en mitad del papel se va, y también las
+     que vienen de dos en dos o en grupitos: que una mota tenga otra al lado
+     no la convierte en texto. Lo que cuenta es cuánta tinta hay alrededor:
+     con letra fina, una letra puede partirse en trocitos, y esos trocitos
+     juntos suman mucha más tinta que un puñado de motas. */
+  const OSCURO = 150;
+  const AREA_MOTA = 40;           // más grande que esto ya es una letra
+  const TINTA_GRUPO = 70;         // lo que suman, como mucho, unas motas juntas
+  const CERCA_X = 14, CERCA_Y = 9;
+  const mancha = new Int32Array(an * al).fill(-1);
+  const areas = [];
+  const puntos = new Int32Array(an * al);   // los puntos de cada mancha, seguidos
+  const desde = [];
+  let usados = 0;
+  for (let i0 = 0; i0 < an * al; i0++) {
+    if (mancha[i0] >= 0 || gris[i0] >= OSCURO) continue;
+    const id = areas.length;
+    const ini = usados;
+    mancha[i0] = id; puntos[usados++] = i0;
+    for (let n = ini; n < usados; n++) {
+      const i = puntos[n];
+      const x = i % an, y = (i / an) | 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        const yy = y + dy;
+        if (yy < 0 || yy >= al) continue;
+        for (let dx = -1; dx <= 1; dx++) {
+          const xx = x + dx;
+          if (xx < 0 || xx >= an) continue;
+          const k = yy * an + xx;
+          if (mancha[k] < 0 && gris[k] < OSCURO) { mancha[k] = id; puntos[usados++] = k; }
+        }
+      }
+    }
+    areas.push(usados - ini);
+    desde.push(ini);
+  }
+  for (let id = 0; id < areas.length; id++) {
+    if (areas[id] > AREA_MOTA) continue;
+    let x0 = an, y0 = al, x1 = 0, y1 = 0;
+    for (let n = desde[id]; n < desde[id] + areas[id]; n++) {
+      const x = puntos[n] % an, y = (puntos[n] / an) | 0;
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+    }
+    let letraCerca = false;
+    const alrededor = new Set();
+    let suma = 0;
+    for (let y = Math.max(0, y0 - CERCA_Y); y <= Math.min(al - 1, y1 + CERCA_Y) && !letraCerca; y++) {
+      for (let x = Math.max(0, x0 - CERCA_X); x <= Math.min(an - 1, x1 + CERCA_X); x++) {
+        const m = mancha[y * an + x];
+        if (m < 0 || alrededor.has(m)) continue;
+        if (areas[m] > AREA_MOTA) { letraCerca = true; break; }
+        alrededor.add(m);
+        suma += areas[m];
+      }
+    }
+    if (letraCerca || suma > TINTA_GRUPO) continue;
+    // se borra la mota y su borde difuminado, que si no queda un anillito
+    // gris que el reconocedor también intenta leer
+    for (let y = Math.max(0, y0 - 2); y <= Math.min(al - 1, y1 + 2); y++) {
+      for (let x = Math.max(0, x0 - 2); x <= Math.min(an - 1, x1 + 2); x++) {
+        const k = y * an + x;
+        if (mancha[k] < 0 || mancha[k] === id) gris[k] = 255;
+      }
+    }
+  }
+  for (let i = 0, j = 0; i < gris.length; i++, j += 4) { d[j] = d[j + 1] = d[j + 2] = gris[i]; }
+
   const salida = document.createElement('canvas');
   salida.width = an; salida.height = al;
   salida.getContext('2d').putImageData(img, 0, 0);
@@ -1476,24 +1678,38 @@ const NOMBRES_OCR = {
  * todas seguidas. Devuelve { salida, ms } o { vacia: true }.
  */
 async function leerYPonerTexto(n, alEstado) {
-  const pagina = doc.loadPage(n);
-  const marco = marcoDe(pagina);
+  let pagina = doc.loadPage(n);
   const escala = PPP_OCR / 72;
-  const pix = pagina.toPixmap(Matrix.scale(escala, escala), ColorSpace.DeviceRGB, false, true);
-  const crudo = document.createElement('canvas');
-  crudo.width = pix.getWidth(); crudo.height = pix.getHeight();
-  crudo.getContext('2d').putImageData(aImageData(pix, crudo.width, crudo.height), 0, 0);
-  pix.destroy();
+  const foto = () => {
+    const pix = pagina.toPixmap(Matrix.scale(escala, escala), ColorSpace.DeviceRGB, false, true);
+    const c = document.createElement('canvas');
+    c.width = pix.getWidth(); c.height = pix.getHeight();
+    c.getContext('2d').putImageData(aImageData(pix, c.width, c.height), 0, 0);
+    pix.destroy();
+    return c;
+  };
+  let crudo = foto();
+  alEstado('Mirando si la hoja está torcida…');
+  const torcida = medirTorcida(crudo);
+  if (torcida) {
+    alEstado('Enderezando la hoja…');
+    enderezarHoja(pagina, torcida);
+    bytesActuales = bytesDe(doc);
+    abrirBytes(bytesActuales, nombre);
+    pagina = doc.loadPage(n);
+    crudo = foto();
+  }
+  const marco = marcoDe(pagina);
   alEstado('Limpiando la hoja para leerla…');
   const limpia = limpiarParaLeer(crudo);
-  const foto = await new Promise((r) => limpia.lienzo.toBlob(r, 'image/png'));
+  const png = await new Promise((r) => limpia.lienzo.toBlob(r, 'image/png'));
 
   const t0 = performance.now();
-  const salida = await reconocer(foto, { columnas: limpia.columnas, filas: limpia.filas }, (estado, avance) => {
+  const salida = await reconocer(png, { columnas: limpia.columnas, filas: limpia.filas }, (estado, avance) => {
     alEstado(NOMBRES_OCR[estado] || estado, avance);
   });
   const ms = Math.round(performance.now() - t0);
-  if (!salida.renglones.length) return { vacia: true };
+  if (!salida.renglones.length) return { vacia: true, torcida };
 
   alEstado('Poniendo el texto encima de la foto…');
   const modelo = {
@@ -1509,10 +1725,12 @@ async function leerYPonerTexto(n, alEstado) {
   abrirBytes(bytes, nombre);
   reconocidos.set(n, {
     texto: salida.texto, confianza: Math.round(salida.confianza),
-    palabras: salida.palabras, renglones: salida.renglones.length, ms,
+    palabras: salida.palabras, renglones: salida.renglones.length, ms, torcida,
   });
-  return { salida, ms };
+  return { salida, ms, torcida };
 }
+
+const enGrados = (g) => Math.abs(g).toFixed(1).replace('.', ',') + '°';
 
 async function reconocerHoja() {
   if (!doc) return;
@@ -1522,6 +1740,11 @@ async function reconocerHoja() {
     const r = await leerYPonerTexto(paginaActual, (t, avance) =>
       cargando(true, t + (avance ? ' ' + Math.round(avance * 100) + '%' : '')));
     if (r.vacia) {
+      if (r.torcida) {             // se enderezó: eso sí se puede deshacer
+        pila.push({ bytes: respaldo, cambios: cambios.slice() });
+        $('#btnDeshacer').disabled = false;
+        dibujar();
+      }
       cargando(false);
       avisar('No se reconoció ninguna palabra en esta hoja.', 'mal');
       return;
@@ -1533,7 +1756,8 @@ async function reconocerHoja() {
     descargado = false;
     apuntarTrabajo();
     avisar(`Reconocidos ${r.salida.renglones.length} renglones, ${r.salida.palabras} palabras `
-      + `(${Math.round(r.salida.confianza)} % de confianza) en ${(r.ms / 1000).toFixed(1)} s.`, 'bien');
+      + `(${Math.round(r.salida.confianza)} % de confianza) en ${(r.ms / 1000).toFixed(1)} s.`
+      + (r.torcida ? ` La hoja estaba torcida ${enGrados(r.torcida)}: se enderezó antes de leerla.` : ''), 'bien');
   } catch (e) {
     console.error(e);
     if (respaldo && bytesActuales !== respaldo) { bytesActuales = respaldo; abrirBytes(respaldo, nombre); }
@@ -1601,6 +1825,7 @@ async function reconocerTodasBoton() {
     : (res.leidas === 1 ? 'Leída 1 hoja' : `Leídas ${res.leidas} hojas`) + ` en ${tiempo}.`;
   if (res.vacias) t += res.vacias === 1 ? ' En 1 no se encontró ninguna palabra.' : ` En ${res.vacias} no se encontró ninguna palabra.`;
   if (res.leidas) t += ' Ya se pueden buscar, copiar y corregir.';
+  if (res.enderezadas) t += res.enderezadas === 1 ? ' 1 hoja estaba torcida y se enderezó.' : ` ${res.enderezadas} hojas estaban torcidas y se enderezaron.`;
   avisar(t, res.leidas ? 'bien' : '');
 }
 
@@ -1613,7 +1838,7 @@ let detenerLectura = false;
  */
 async function reconocerTodas() {
   const faltan = hojasPorLeer();
-  const res = { leidas: 0, vacias: 0, total: faltan.length, detenido: false };
+  const res = { leidas: 0, vacias: 0, total: faltan.length, detenido: false, enderezadas: 0 };
   if (!faltan.length) return res;
   const respaldo = bytesActuales;
   detenerLectura = false;
@@ -1635,13 +1860,14 @@ async function reconocerTodas() {
         if (avance) pintarAvance(k, avance);
       });
       if (r.vacia) res.vacias++; else res.leidas++;
+      if (r.torcida) res.enderezadas++;
     }
     pintarAvance(faltan.length, 0);
   } catch (e) {
     cargando(false);
     throw e;
   }
-  if (res.leidas) {
+  if (res.leidas || res.enderezadas) {
     pila.push({ bytes: respaldo, cambios: cambios.slice() });
     $('#btnDeshacer').disabled = false;
     descargado = false;

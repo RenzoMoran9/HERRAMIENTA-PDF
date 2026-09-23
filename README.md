@@ -228,6 +228,26 @@ también fuera de aquí: en Acrobat, en el gestor documental, donde sea.
 Va en español, tarda un par de segundos por hoja, y funciona **sin internet**:
 el motor y el idioma viajan dentro del propio archivo.
 
+### Hojas torcidas, grises o con motitas
+Antes de leer, el editor prepara la hoja:
+
+- **La endereza si entró torcida** (hasta unos 8°). Mide el giro con el que
+  los renglones quedan más limpios, como **Revisar** en Grapa, y gira la hoja
+  de verdad en el documento: la foto no se vuelve a dibujar, solo se gira,
+  así que no pierde calidad. Lo avisa («La hoja estaba torcida 2,5°: se
+  enderezó») y **Deshacer** la deja como llegó. La que está derecha no se toca.
+- **Le quita el gris** a la copia que lee: el papel gris, amarillento o con
+  sombra pasa a blanco y la letra a negro, zona por zona.
+- **Le quita las motitas** a esa copia: las manchitas sueltas del polvo, que
+  se leían como comas, guiones o letras. Un punto decimal, el de la «i» o los
+  dos puntos se quedan, porque están pegados a letras.
+
+El gris y las motitas se quitan **solo para leer**: la foto del documento
+sigue como estaba. Con cuatro escaneos sucios de prueba, lo que se lee bien
+pasó del 91 % al 96 % de las palabras y el texto basura, de 28 palabras a 6.
+Una motita pegada a una palabra todavía puede hacer que esa palabra se
+pierda o salga con una letra cambiada.
+
 ### Todas las hojas de una vez
 Si el documento tiene varias hojas escaneadas, el cartel ofrece también
 **Reconocer las N hojas escaneadas**, y desde una hoja con texto el panel
@@ -354,6 +374,10 @@ node pruebas/tachar.mjs       # tachar de verdad: el DNI fuera del texto, de
 node pruebas/todas-hojas.mjs  # leer todas las escaneadas de una vez: por cuál
                               # va, detener, un solo Deshacer, y la hoja con
                               # texto sin tocar
+node pruebas/hacer-sucio.mjs  # rehace los cuatro escaneos sucios inventados
+node pruebas/sucio.mjs        # leer hojas torcidas, grises y con motitas:
+                              # cuánto se lee bien, que queden derechas (la
+                              # derecha sin tocar) y la foto con su gris
 node pruebas/todas.mjs        # todas, una detrás de otra
 node pruebas/corregir-escaneo.mjs   # corregir un renglón de una foto: comprueba
                                     # que la FOTO también cambia, volviéndola a
