@@ -1727,7 +1727,15 @@ async function leerYPonerTexto(n, alEstado) {
     texto: salida.texto, confianza: Math.round(salida.confianza),
     palabras: salida.palabras, renglones: salida.renglones.length, ms, torcida,
   });
-  return { salida, ms, torcida };
+  return { salida, ms, torcida, corregidos: salida.corregidos || {} };
+}
+
+/** «Se corrigieron 3 errores típicos del reconocimiento (N° ×2, S/ ×1).» */
+function textoCorregidos(c) {
+  const total = Object.values(c || {}).reduce((a, n) => a + n, 0);
+  if (!total) return '';
+  return ` Se ${total === 1 ? 'corrigió 1 error típico' : `corrigieron ${total} errores típicos`} del reconocimiento (`
+    + Object.entries(c).map(([k, n]) => `${k} ×${n}`).join(', ') + ').';
 }
 
 const enGrados = (g) => Math.abs(g).toFixed(1).replace('.', ',') + '°';
@@ -1757,7 +1765,8 @@ async function reconocerHoja() {
     apuntarTrabajo();
     avisar(`Reconocidos ${r.salida.renglones.length} renglones, ${r.salida.palabras} palabras `
       + `(${Math.round(r.salida.confianza)} % de confianza) en ${(r.ms / 1000).toFixed(1)} s.`
-      + (r.torcida ? ` La hoja estaba torcida ${enGrados(r.torcida)}: se enderezó antes de leerla.` : ''), 'bien');
+      + (r.torcida ? ` La hoja estaba torcida ${enGrados(r.torcida)}: se enderezó antes de leerla.` : '')
+      + textoCorregidos(r.corregidos), 'bien');
   } catch (e) {
     console.error(e);
     if (respaldo && bytesActuales !== respaldo) { bytesActuales = respaldo; abrirBytes(respaldo, nombre); }
@@ -1826,6 +1835,7 @@ async function reconocerTodasBoton() {
   if (res.vacias) t += res.vacias === 1 ? ' En 1 no se encontró ninguna palabra.' : ` En ${res.vacias} no se encontró ninguna palabra.`;
   if (res.leidas) t += ' Ya se pueden buscar, copiar y corregir.';
   if (res.enderezadas) t += res.enderezadas === 1 ? ' 1 hoja estaba torcida y se enderezó.' : ` ${res.enderezadas} hojas estaban torcidas y se enderezaron.`;
+  t += textoCorregidos(res.corregidos);
   avisar(t, res.leidas ? 'bien' : '');
 }
 
@@ -1838,7 +1848,7 @@ let detenerLectura = false;
  */
 async function reconocerTodas() {
   const faltan = hojasPorLeer();
-  const res = { leidas: 0, vacias: 0, total: faltan.length, detenido: false, enderezadas: 0 };
+  const res = { leidas: 0, vacias: 0, total: faltan.length, detenido: false, enderezadas: 0, corregidos: {} };
   if (!faltan.length) return res;
   const respaldo = bytesActuales;
   detenerLectura = false;
@@ -1861,6 +1871,7 @@ async function reconocerTodas() {
       });
       if (r.vacia) res.vacias++; else res.leidas++;
       if (r.torcida) res.enderezadas++;
+      for (const [k, n] of Object.entries(r.corregidos || {})) res.corregidos[k] = (res.corregidos[k] || 0) + n;
     }
     pintarAvance(faltan.length, 0);
   } catch (e) {

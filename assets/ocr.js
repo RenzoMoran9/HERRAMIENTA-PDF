@@ -275,11 +275,70 @@ export async function reconocer(imagen, cuadricula, alProgresar) {
   renglones.length = 0;
   renglones.push(...finales);
   renglones.sort((a, b) => (a.y0 - b.y0) || (a.x0 - b.x0));
+  const corregidos = {};
+  for (const r of renglones) {
+    const c = corregirHabituales(r.texto);
+    r.texto = c.texto;
+    for (const [k, n] of Object.entries(c.cuentas)) corregidos[k] = (corregidos[k] || 0) + n;
+  }
   const texto = renglones.map((r) => r.texto).join('\n');
   const conf = renglones.length
     ? renglones.reduce((a, r) => a + r.conf, 0) / renglones.length
     : (data.confidence || 0);
-  return { texto, confianza: conf, renglones, palabras: uno.palabras + sumados };
+  return { texto, confianza: conf, renglones, palabras: uno.palabras + sumados, corregidos };
+}
+
+/* ---------- los errores que el reconocimiento repite ----------
+
+   En un expediente hay cosas que aparecen en cada hoja y que el
+   reconocimiento lee mal casi siempre igual. Se corrigen aquí, pero solo
+   cuando no hay duda de qué era:
+
+     · «N°» sale como N*, N", N', N”, N?, NS, N- o No… Se corrige cuando
+       detrás viene un número: «N* 128-2026» es «N° 128-2026».
+     · «S/» sale como 5/, S|, $/, 51, 57, 5:, si, SI o un 5 suelto. Se
+       corrige cuando detrás viene un MONTO con sus dos decimales. Las formas
+       que también podrían ser otra cosa —«51 12,480.50» puede ser el ítem 51
+       con su monto, «si 1,250.00» puede ser una frase— solo se corrigen si
+       delante hay algo que habla de dinero: «Son:», «total», «precio»…
+       Y ninguna cifra se toca: «51,250.00» sigue siendo 51,250.00.
+     · «DE» sale como na, ne, oe, pe, 0E u OE entre dos palabras en
+       MAYÚSCULAS: «ORDEN na COMPRA» es «ORDEN DE COMPRA».
+
+   Lo que no se ha podido leer no se inventa: si el reconocimiento se come
+   una palabra entera, eso no se arregla aquí. */
+const MONTO = String.raw`\d{1,3}(?:[,.]\d{3})*[.,]\d{2}(?!\d)`;
+const DINERO = String.raw`\b(?:total|monto|precio|unitario|importe|son|adelanto|saldo|pago|valor|costo|subtotal|igv|soles|suma|asciende|a)\W{0,3}`;
+const REGLAS = [
+  // N°: la marca de número mal leída, seguida de un número
+  { que: 'N°', re: /\bN\s?(?:[*"'”“’?º\-]|S(?=\s)|o(?=\s?\d)|e(?=\s?\d))\s?(?=\d)/g, por: 'N° ' },
+  // S/: las formas que no pueden ser otra cosa, delante de un monto
+  { que: 'S/', re: new RegExp(String.raw`(^|[^\p{L}\p{N}])(?:5\/|S\||5\||\$\/|\$|S7|S1|SI\/|5I)\.?\s?(?=` + MONTO + ')', 'gu'), por: '$1S/ ' },
+  // S/: las dudosas, solo si delante se habla de dinero
+  // (las hechas de cifras piden un espacio antes del monto: «51,250.00» es un
+  // monto de cincuenta y un mil y no se toca; nunca se come una cifra)
+  { que: 'S/', re: new RegExp('(' + DINERO + String.raw`)(?:(?:51|57|5)\s|5:\s?|(?:si|sl)\.?\s?)(?=` + MONTO + ')', 'giu'), por: '$1S/ ' },
+  // DE entre dos palabras en mayúsculas
+  { que: 'DE', re: /(\b[A-ZÁÉÍÓÚÑ]{2,}\s)(?:na|ne|oe|pe|0E|OE|DF)(?=\s[A-ZÁÉÍÓÚÑ]{2,}\b)/g, por: '$1DE' },
+];
+
+/**
+ * Corrige un renglón. Devuelve el texto y cuántas veces se corrigió cada
+ * cosa, para poder decirlo: { texto, cuentas: { 'N°': 2, 'S/': 1 } }.
+ */
+export function corregirHabituales(texto) {
+  let t = String(texto || '');
+  const cuentas = {};
+  for (const r of REGLAS) {
+    t = t.replace(r.re, (...m) => {
+      cuentas[r.que] = (cuentas[r.que] || 0) + 1;
+      // el reemplazo con $1 hay que hacerlo a mano dentro de una función
+      return r.por.replace('$1', typeof m[1] === 'string' ? m[1] : '');
+    });
+  }
+  // el espacio que ya traía el original no se duplica
+  t = t.replace(/(N°|S\/) {2,}/g, '$1 ');
+  return { texto: t, cuentas };
 }
 
 export async function soltar() {

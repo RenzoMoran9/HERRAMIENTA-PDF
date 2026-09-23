@@ -248,6 +248,24 @@ pasó del 91 % al 96 % de las palabras y el texto basura, de 28 palabras a 6.
 Una motita pegada a una palabra todavía puede hacer que esa palabra se
 pierda o salga con una letra cambiada.
 
+### Errores que el reconocimiento repite
+Hay cosas que salen en cada hoja de un expediente y que el reconocimiento lee
+mal casi siempre igual. Al leer, el editor las corrige solo, y lo dice («Se
+corrigieron 25 errores típicos del reconocimiento (N° ×16, S/ ×9)»):
+
+- **N°** leído como `N*`, `N"`, `N'`, `N?`, `NS` o `N-`, cuando detrás viene
+  un número: «N* 128-2026» pasa a «N° 128-2026».
+- **S/** leído como `5/`, `S|`, `$/`, `51`, `57`, `5:`, `si` o un `5` suelto,
+  cuando detrás viene un monto con sus decimales. Las formas que podrían ser
+  otra cosa («51 12,480.50» puede ser el ítem 51) solo se corrigen si delante
+  se habla de dinero: «Son:», «total», «precio», «monto»…
+- **DE** leído como `na`, `ne`, `oe` entre dos palabras en mayúsculas.
+
+**Nunca se toca una cifra**: «51,250.00» sigue siendo cincuenta y un mil. Y
+lo que el reconocimiento no llegó a ver —un «N°» que se perdió entero— no se
+inventa. En cuatro hojas de prueba, los N° bien escritos pasaron de 0 de 20 a
+16, y los S/ de 10 a 19.
+
 ### Todas las hojas de una vez
 Si el documento tiene varias hojas escaneadas, el cartel ofrece también
 **Reconocer las N hojas escaneadas**, y desde una hoja con texto el panel
@@ -378,6 +396,9 @@ node pruebas/hacer-sucio.mjs  # rehace los cuatro escaneos sucios inventados
 node pruebas/sucio.mjs        # leer hojas torcidas, grises y con motitas:
                               # cuánto se lee bien, que queden derechas (la
                               # derecha sin tocar) y la foto con su gris
+node pruebas/hacer-errores.mjs # rehace las hojas inventadas con N° y S/
+node pruebas/errores.mjs      # corregir N° y S/ mal leídos, frase a frase y
+                              # en un documento, sin tocar nunca una cifra
 node pruebas/todas.mjs        # todas, una detrás de otra
 node pruebas/corregir-escaneo.mjs   # corregir un renglón de una foto: comprueba
                                     # que la FOTO también cambia, volviéndola a
