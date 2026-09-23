@@ -767,6 +767,7 @@ function dibujar() {
   $('#cartelEscaneo').hidden = !esEscaneo || tachando;
   $('#hojaEnvoltura').hidden = esEscaneo && !tachando;
   pintarReconocido(conOCR);
+  pintarPorLeer();
   pintarCambios();
 
   $('#btnInsertar').disabled = esEscaneo;
@@ -1545,7 +1546,10 @@ async function reconocerHoja() {
  * Las hojas que son solo foto: sin texto de verdad y sin reconocer todavía.
  * Las que ya tienen texto no se tocan: leerlas otra vez no añade nada.
  */
+let porLeerDe = { bytes: null, hojas: [] };
 function hojasPorLeer() {
+  // leer el texto de cada hoja cuesta: se hace una vez por versión del archivo
+  if (porLeerDe.bytes === bytesActuales) return porLeerDe.hojas;
   const faltan = [];
   for (let n = 0; n < totalPaginas; n++) {
     const pagina = doc.loadPage(n);
@@ -1557,7 +1561,47 @@ function hojasPorLeer() {
     if (letras >= 20) continue;
     faltan.push(n);
   }
+  porLeerDe = { bytes: bytesActuales, hojas: faltan };
   return faltan;
+}
+
+/** Cuántas hojas quedan por leer, en el cartel del escaneo y en el panel. */
+function pintarPorLeer() {
+  const faltan = doc ? hojasPorLeer() : [];
+  const n = faltan.length;
+  const aqui = faltan.includes(paginaActual);
+  // en el cartel: «esta hoja» y, si hay más, «todas»
+  $('#btnReconocerTexto').textContent = n > 1 ? 'Reconocer esta hoja' : 'Reconocer el texto';
+  $('#btnReconocerTodas').hidden = n < 2;
+  $('#btnReconocerTodas').textContent = `Reconocer las ${n} hojas escaneadas`;
+  // en el panel, cuando la hoja que se mira no es una de ellas
+  $('#porLeer').hidden = !n || aqui || tachando;
+  $('#porLeerTexto').textContent = (n === 1
+    ? 'Hay 1 hoja escaneada sin leer: no se puede buscar ni corregir.'
+    : `Hay ${n} hojas escaneadas sin leer: no se pueden buscar ni corregir.`);
+  $('#btnReconocerTodas2').textContent = n === 1 ? 'Reconocerla' : `Reconocer las ${n}`;
+}
+
+/** «Reconocer todas», con el editor abierto a solas. */
+async function reconocerTodasBoton() {
+  if (!doc) return;
+  const t0 = performance.now();
+  let res;
+  try {
+    res = await reconocerTodas();
+  } catch (e) {
+    console.error(e);
+    avisar('No se pudo reconocer: ' + e.message, 'mal');
+    return;
+  }
+  const s = Math.round((performance.now() - t0) / 1000);
+  const tiempo = s >= 60 ? `${Math.floor(s / 60)} min ${s % 60} s` : `${s} s`;
+  let t = res.detenido
+    ? `Detenido: se leyeron ${res.leidas} de ${res.total} hojas. Las demás siguen sin leer.`
+    : (res.leidas === 1 ? 'Leída 1 hoja' : `Leídas ${res.leidas} hojas`) + ` en ${tiempo}.`;
+  if (res.vacias) t += res.vacias === 1 ? ' En 1 no se encontró ninguna palabra.' : ` En ${res.vacias} no se encontró ninguna palabra.`;
+  if (res.leidas) t += ' Ya se pueden buscar, copiar y corregir.';
+  avisar(t, res.leidas ? 'bien' : '');
 }
 
 let detenerLectura = false;
@@ -3155,6 +3199,8 @@ $('#cargaDetener').addEventListener('click', () => {
 });
 $('#btnDeshacer').addEventListener('click', deshacer);
 $('#btnReconocer').addEventListener('click', reconocerHoja);
+$('#btnReconocerTodas').addEventListener('click', reconocerTodasBoton);
+$('#btnReconocerTodas2').addEventListener('click', reconocerTodasBoton);
 $('#btnCopiarTexto').addEventListener('click', async () => {
   try {
     await navigator.clipboard.writeText($('#reconocidoTexto').value);

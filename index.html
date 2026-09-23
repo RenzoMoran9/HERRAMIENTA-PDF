@@ -114,6 +114,11 @@
       <p class="pista">Tachar QUITA del archivo lo que hay debajo —las letras y, en un escaneo, los píxeles de la foto— y deja un recuadro negro. No se puede recuperar copiando ni con otro programa. Deshacer sí lo devuelve, mientras no cierres el editor.</p>
     </div>
 
+    <div class="por-leer" id="porLeer" hidden>
+      <p class="pista" id="porLeerTexto"></p>
+      <button class="btn btn-suave" id="btnReconocerTodas2">Reconocer todas</button>
+    </div>
+
     <h2 class="lateral-titulo lateral-titulo-2">Cambios</h2>
     <p class="pista" id="pistaCambios">Haz clic sobre cualquier renglón de la hoja para corregir su texto.
       Para <b>borrarlo</b>, déjalo vacío y pulsa Enter. Para <b>escribir donde no hay
@@ -149,10 +154,13 @@
            copiar</b> —también fuera de aquí— y sus renglones se podrán
            <b>corregir</b>: al corregir uno se tapa la zona con el color del propio
            papel y se escribe encima.</p>
+        <div class="cartel-botones">
         <button class="btn btn-primario" id="btnReconocer">
           <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-lupa-texto"/></svg>
-          Reconocer el texto
+          <span id="btnReconocerTexto">Reconocer el texto</span>
         </button>
+        <button class="btn btn-suave" id="btnReconocerTodas" hidden>Reconocer todas</button>
+        </div>
         <p class="cartel-pista">Para escribir <em>encima</em> de una hoja así —una nota, un
            «COPIA FIEL», un sello— usa <b>Sello y marcas</b> en Grapa, que añade el texto
            sin tocar el escaneo.</p>

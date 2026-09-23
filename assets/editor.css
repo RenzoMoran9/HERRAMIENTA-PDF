@@ -356,3 +356,9 @@ svg[class^="ico"], svg[class*=" ico"]{
 .btn-tachar{ background:var(--rojo); border-color:var(--rojo); color:#fff; }
 .btn-tachar:disabled{ opacity:.5; }
 .btn-tachar-todas{ margin:2px 0 6px; }
+
+/* hojas escaneadas del documento que todavía no se han leído */
+.por-leer{ margin:14px 0 4px; padding:10px 12px; border-radius:var(--radio); background:var(--fondo-3, rgba(127,127,127,.08)); border:1px solid var(--borde-suave); }
+.por-leer .pista{ margin:0 0 8px; }
+.cartel-botones{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin:2px 0 12px; }
+.cartel-botones .btn{ width:auto; margin:0; }

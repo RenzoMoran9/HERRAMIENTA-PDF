@@ -228,6 +228,15 @@ también fuera de aquí: en Acrobat, en el gestor documental, donde sea.
 Va en español, tarda un par de segundos por hoja, y funciona **sin internet**:
 el motor y el idioma viajan dentro del propio archivo.
 
+### Todas las hojas de una vez
+Si el documento tiene varias hojas escaneadas, el cartel ofrece también
+**Reconocer las N hojas escaneadas**, y desde una hoja con texto el panel
+avisa de cuántas quedan sin leer. Las lee seguidas: dice por cuál va («Hoja 3
+de 12») con una barra, y **Detener** para al terminar la hoja en curso sin
+perder lo ya leído. Al acabar dice cuántas leyó y en cuánto tiempo. Las hojas
+que ya tienen texto o ya se reconocieron no se vuelven a leer, y un solo
+**Deshacer** quita todo lo de esa lectura.
+
 Desde Grapa, **Hacer buscables** (en «Buscar») manda todas las hojas
 escaneadas del expediente de una vez: el editor las lee seguidas, con la
 cuenta de «Hoja 3 de 12» y un botón **Detener**, se las devuelve a Grapa y
@@ -342,6 +351,9 @@ node pruebas/natural.mjs      # corregir sobre la hoja con su letra y su papel,
 node pruebas/tachar.mjs       # tachar de verdad: el DNI fuera del texto, de
                               # dentro del archivo y de la foto, también en
                               # escaneos reconocidos y en hojas giradas
+node pruebas/todas-hojas.mjs  # leer todas las escaneadas de una vez: por cuál
+                              # va, detener, un solo Deshacer, y la hoja con
+                              # texto sin tocar
 node pruebas/todas.mjs        # todas, una detrás de otra
 node pruebas/corregir-escaneo.mjs   # corregir un renglón de una foto: comprueba
                                     # que la FOTO también cambia, volviéndola a

@@ -23,6 +23,12 @@ async function piezas() {
 }
 
 let trabajador = null;
+/* A quién se le cuenta el avance. El motor se arranca una sola vez y se
+   queda con la función que le pasemos al arrancar: si fuera la de aquella
+   primera lectura, las siguientes enseñarían el avance de la primera
+   («Hoja 1 de 3» cuando se va por la 1 de 2). Por eso pasa por aquí, y
+   cada lectura pone la suya. */
+let avisarA = null;
 
 /**
  * El trabajador se arma aquí, pegando tres cosas:
@@ -34,6 +40,7 @@ let trabajador = null;
  *   3. el trabajador propiamente dicho.
  */
 async function arrancar(alProgresar) {
+  avisarA = alProgresar || null;
   if (trabajador) return trabajador;
   const p = await piezas();
   const b64 = btoa(Array.from(p.idioma, (n) => String.fromCharCode(n)).join(''));
@@ -51,7 +58,7 @@ async function arrancar(alProgresar) {
       langPath: 'https://grapa.interno',   // nunca se llega a pedir: lo sirve el pedacito
       gzip: true,
       cacheMethod: 'none',                 // guardar en el navegador no funciona desde el disco
-      logger: (m) => { if (alProgresar && m.status) alProgresar(m.status, m.progress); },
+      logger: (m) => { if (avisarA && m.status) avisarA(m.status, m.progress); },
     });
   } finally {
     URL.revokeObjectURL(url);
