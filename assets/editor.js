@@ -1148,15 +1148,25 @@ function medirRenglon(pagina, caja) {
          cuenta como sucia, así que el parche se la traga y al taparla
          desaparece el borde de la celda.
 
-     Una raya se reconoce en que cruza la caja de lado a lado: ninguna
-     letra llena más de la mitad del ancho en una sola fila. */
+     Una raya se reconoce en que cruza la caja de lado a lado SIN CORTARSE.
+     No basta con contar cuánta tinta lleva la fila: en un renglón corto y
+     en negrita —«Importante», «Fecha:25/03/2021»— la parte de abajo de las
+     letras llena casi todo el ancho, y tomándola por raya la letra se medía
+     más chica y el papel que tapa lo viejo no llegaba hasta abajo. Entre
+     letra y letra siempre hay un hueco; en una raya, no. */
   const oscuraEnFila = new Int32Array(al);
+  const seguidaEnFila = new Int32Array(al);
   for (let y = 0; y < al; y++) {
-    let n = 0;
-    for (let x = 0; x < an; x++) if (lum[y * an + x] < umbral) n++;
+    let n = 0, racha = 0, mejor = 0, hueco = 0;
+    for (let x = 0; x < an; x++) {
+      if (lum[y * an + x] < umbral) { n++; racha += hueco + 1; hueco = 0; }
+      else if (racha && ++hueco > 2) { racha = 0; hueco = 0; }   // un escaneo corta la raya a trozos de uno o dos puntos
+      if (racha > mejor) mejor = racha;
+    }
     oscuraEnFila[y] = n;
+    seguidaEnFila[y] = mejor;
   }
-  const esRaya = (y) => oscuraEnFila[y] > an * 0.6;
+  const esRaya = (y) => seguidaEnFila[y] > an * 0.6;
   // una mota suelta no es un renglón: para contar como fila con tinta hace
   // falta algo más que dos o tres píxeles perdidos
   const hayTinta = (y) => !esRaya(y) && oscuraEnFila[y] >= Math.max(2, an * 0.015);
@@ -1269,6 +1279,25 @@ function medirRenglon(pagina, caja) {
   const suavidad = bordes ? Math.min(4, medios / bordes) : 1;
   const altoTinta = (abajo - arriba + 1) / A;
 
+  // Cuánto papel LIMPIO hay a la derecha del renglón, a su altura: hasta la
+  // primera tinta (otra palabra, la raya de una celda, una firma) o hasta el
+  // margen de la hoja. Si el texto nuevo es más largo, cabe ahí sin
+  // apretarlo; apretarlo cuando al lado no hay nada lo deja más fino y canta.
+  let libre = 0;
+  {
+    const margen = Math.round(18 * A);
+    const ya0 = y0 + arriba, ya1 = y0 + abajo;
+    for (let xa = x0 + an; xa < anP - margen; xa++) {
+      let sucia = false;
+      for (let ya = ya0; ya <= ya1; ya++) {
+        const o = ya * salto + xa * n;
+        if ((px[o] + px[o + 1] + px[o + 2]) / 3 < umbral) { sucia = true; break; }
+      }
+      if (sucia) break;
+      libre++;
+    }
+  }
+
   // La LÍNEA BASE: donde acaba de golpe el cuerpo de las letras. Por debajo
   // solo quedan las colas de la g, la p o la coma, y esas a veces cuentan
   // como tinta y a veces no —depende de cuántas haya en el renglón—, así
@@ -1367,6 +1396,7 @@ function medirRenglon(pagina, caja) {
     abajo: (y0 + abajo) / A,
     izquierda: (x0 + izq) / A,
     ancho: (der - izq + 1) / A,
+    libre: libre / A,                 // papel limpio a la derecha, en puntos
   };
 }
 
@@ -2434,6 +2464,7 @@ function reescribirEnEscaneo(indice, textoNuevo, desp, aj) {
   if (!fila) return { ok: false, motivo: 'No encuentro el reconocimiento de esta hoja; vuelve a reconocerla.' };
 
   const antes = fila.t, eraEditado = !!fila.editado;
+  const textoAntes = pagina.toStructuredText('preserve-whitespace').asText();
 
   // Se mide el renglón ORIGINAL y se copian sus rasgos. El tamaño y la línea
   // base se deducen de lo que ocupa la tinta de verdad, no del recuadro que
@@ -2452,6 +2483,23 @@ function reescribirEnEscaneo(indice, textoNuevo, desp, aj) {
     fila.hueco = Math.max(med.ancho, fila.x1 - fila.x0);
     fila.suavidad = med.suavidad;
     if (med.parche) parchesPapel.set(paginaActual + ':' + r.enModelo, { p: med.parche, s: med.suavidad });
+  }
+  // Si el texto nuevo no cabe en el hueco del viejo pero a la derecha hay
+  // papel limpio, se usa: el parche se alarga hasta ahí (midiendo de nuevo
+  // con la caja más ancha) y el texto va a su tamaño, sin apretarlo.
+  if (med && textoNuevo && med.libre > 0) {
+    const tamN = aj && aj.tam != null ? aj.tam : fila.tam;
+    const negN = aj && aj.negrita != null ? aj.negrita : fila.negrita;
+    const hace = medirAncho(new Font(negN ? 'Helvetica-Bold' : 'Helvetica'), comoQuedara(textoNuevo).texto, tamN);
+    const falta = hace - fila.hueco + tamN * 0.2;
+    const extra = Math.min(falta, med.libre - tamN * 0.5);
+    if (falta > 0 && extra > 0.5) {
+      const ancha = medirRenglon(pagina, [fila.x0, fila.y0, fila.x1 + extra, fila.y1]);
+      if (ancha && ancha.parche) {
+        parchesPapel.set(paginaActual + ':' + r.enModelo, { p: ancha.parche, s: med.suavidad });
+        fila.hueco += extra;
+      }
+    }
   }
   // lo ajustado a mano manda sobre lo medido; el parche de papel se vuelve a
   // componer con esa letra, así que también cambia en la foto
@@ -2499,8 +2547,16 @@ function reescribirEnEscaneo(indice, textoNuevo, desp, aj) {
   const texto = comprobar.loadPage(paginaActual).toStructuredText('preserve-whitespace').asText();
   const queda = comoQuedara(textoNuevo);
   if (textoNuevo && !texto.includes(queda.texto.trim())) return volver('El texto nuevo no quedó donde debía; no se cambió nada.');
-  // (si solo se movió, el texto viejo y el nuevo son el mismo)
-  if (antes.trim() && antes !== textoNuevo && texto.includes(antes.trim())) return volver('El texto viejo seguía ahí; no se cambió nada.');
+  // (si solo se movió, el texto viejo y el nuevo son el mismo). Se cuentan
+  // las veces: si el nuevo CONTIENE al viejo —«DEPENDENCIA SUNAT» →
+  // «DEPENDENCIA SUNAT LIMA»—, el viejo aparece dentro del nuevo y eso no
+  // quiere decir que se haya quedado.
+  const veces = (t, a) => (a ? t.split(a).length - 1 : 0);
+  const viejo = antes.trim();
+  if (viejo && antes !== textoNuevo
+      && veces(texto, viejo) > veces(textoAntes, viejo) - 1 + veces(queda.texto, viejo)) {
+    return volver('El texto viejo seguía ahí; no se cambió nada.');
+  }
 
   bytesActuales = salida;
   abrirBytes(salida, nombre);
