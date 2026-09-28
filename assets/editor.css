@@ -376,6 +376,7 @@ svg[class^="ico"], svg[class*=" ico"]{
 }
 .campo-ajustes button:hover{ background:var(--fondo-3, rgba(127,127,127,.12)); }
 .campo-ajustes .campo-negrita{ font-weight:900; }
+.campo-ajustes .campo-letra{ min-width:64px; font-weight:500; border-color:var(--borde); }
 .campo-ajustes button.activo{ border-color:var(--acento); background:rgba(127,127,127,.12); }
 .campo-ajustes .campo-tam{ min-width:44px; text-align:center; font-variant-numeric:tabular-nums; color:var(--texto-2); }
 .campo-ajustes .campo-sep{ width:1px; height:16px; background:var(--borde); margin:0 3px; }

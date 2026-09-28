@@ -45,12 +45,23 @@ const bajar = async (nombre) => {
 };
 const modelo = (d) => JSON.parse(d.loadPage(0).getObject().get('GrapaOCR').asString());
 const K = 4;
-/** Cuántos puntos oscuros hay en una franja de la hoja (en puntos). */
-function tintaEnFranja(d, x0, x1, y0, y1) {
+/** Cuántos puntos oscuros hay en una franja de la hoja (en puntos). Con
+ *  `sueltos`, no cuenta los de una columna que viene con tinta desde
+ *  arriba de la franja: son una letra nueva que baja de la línea (la «/»
+ *  de Tahoma o Verdana), no restos de lo viejo. */
+function tintaEnFranja(d, x0, x1, y0, y1, sueltos = false) {
   const px = d.loadPage(0).toPixmap(mupdf.Matrix.scale(K, K), mupdf.ColorSpace.DeviceGray, false, true);
   const v = px.getPixels(), st = px.getStride();
+  const arriba = Math.floor(y0 * K) - 3;
   let n = 0;
-  for (let y = Math.floor(y0 * K); y < Math.ceil(y1 * K); y++) for (let x = Math.floor(x0 * K); x < Math.ceil(x1 * K); x++) if (v[y * st + x] < 110) n++;
+  for (let y = Math.floor(y0 * K); y < Math.ceil(y1 * K); y++) {
+    for (let x = Math.floor(x0 * K); x < Math.ceil(x1 * K); x++) {
+      if (v[y * st + x] >= 110) continue;
+      let pegada = sueltos;
+      for (let yy = arriba; pegada && yy < y; yy++) if (v[yy * st + x] >= 110) pegada = false;
+      if (!pegada) n++;
+    }
+  }
   return n;
 }
 let hechos = 0;
@@ -88,7 +99,7 @@ const fila = modelo(d).renglones.find((r2) => /26\/03/.test(r2.t));
 // por debajo de la línea base del renglón nuevo no puede quedar tinta: lo
 // que hubiera ahí son los pies de los números viejos (ni «Fecha» ni las
 // cifras bajan de la línea)
-const resto = fila ? tintaEnFranja(d, fila0.x0, fila0.x1, fila.base + 0.5, fila0.y1 + 0.8) : -1;
+const resto = fila ? tintaEnFranja(d, fila0.x0, fila0.x1, fila.base + 0.5, fila0.y1 + 0.8, true) : -1;
 ok('debajo de lo nuevo no asoma nada de lo viejo', resto >= 0 && resto <= 6, { puntosOscuros: resto });
 
 console.log('\n--- añadir al final de un renglón ---');

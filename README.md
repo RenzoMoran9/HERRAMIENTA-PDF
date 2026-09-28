@@ -70,6 +70,13 @@ Encima del campo hay una barrita para corregirlo viendo ya cómo queda:
 - **A−** y **A+**: medio punto menos o más; en medio se ve el tamaño.
 - **N**: negrita sí o no (también `Ctrl` + `B`).
 - **Colores**: el de antes (círculo punteado), negro, azul y rojo.
+- **Tipo de letra** (solo en hojas escaneadas): el botón dice con cuál se
+  escribirá —Arial, Tahoma, Verdana, Times o Courier— y cada clic pasa a la
+  siguiente. El editor la adivina sola midiendo lo grueso y lo ancho del
+  trazo en la foto: las constancias de SUNAT, en Tahoma negrita, ya no salen
+  corregidas con una letra más fina. Al **Insertar** en un escaneo se usa la
+  del renglón de al lado. En una hoja con texto de verdad no hace falta: se
+  escribe con la letra del propio documento.
 
 Con `Enter` se aplica al renglón entero, en una hoja de texto y en una
 escaneada (ahí también cambia lo que se dibuja sobre la foto), y al escribir
@@ -244,7 +251,9 @@ encontraría nada.
   volver a escribir, pero el editor no guarda el texto que había antes de la
   primera corrección. Dentro de la misma sesión, `Ctrl+Z`.
 - **Reproducir una tipografía manuscrita o poco corriente** al corregir un
-  escaneo: se escribe con la equivalente estándar, normal o negrita.
+  escaneo: se escribe con la más parecida de cinco (Arial, Tahoma, Verdana,
+  Times, Courier), normal o negrita. Si el equipo no tiene la elegida, usa
+  la más parecida que haya.
 - Cambiar el **tamaño, el color o la negrita** de un renglón a mano: se
   conservan los del original, pero no se pueden elegir.
 
@@ -443,6 +452,9 @@ node pruebas/corto.mjs        # corregir renglones cortos en negrita: su tamaño
 node pruebas/hacer-ficha.mjs  # rehace la ficha inventada con cuadro sin rayas
 node pruebas/ficha.mjs        # cada celda su renglón, de su tamaño; corregir
                               # una sin tocar las demás; volver a leer
+node pruebas/letra.mjs        # en un escaneo, la letra que adivina (Tahoma en
+                              # negrita gruesa), cambiarla con el botón, y la
+                              # misma al insertar
 node pruebas/todas.mjs        # todas, una detrás de otra
 node pruebas/corregir-escaneo.mjs   # corregir un renglón de una foto: comprueba
                                     # que la FOTO también cambia, volviéndola a

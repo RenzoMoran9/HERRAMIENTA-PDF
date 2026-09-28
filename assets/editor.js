@@ -831,8 +831,48 @@ function cerrarCampo() {
    punto, para ajustarlo a mano antes de ponerlo.                        */
 
 /** La letra de un renglón, para dibujarla igual en la pantalla. */
+/* ---------- la letra de un escaneo ----------
+
+   En una hoja escaneada, lo corregido se dibuja como parte de la foto, así
+   que se puede escribir con cualquier letra que tenga el equipo. Las de los
+   documentos del Estado son casi siempre estas; Windows las trae todas, y
+   en otro equipo se usa la más parecida que haya. */
+const LETRAS_ESCANEO = {
+  arial: { nombre: 'Arial', css: 'Arial, Helvetica, "Liberation Sans", sans-serif' },
+  tahoma: { nombre: 'Tahoma', css: 'Tahoma, "DejaVu Sans Condensed", "DejaVu Sans", Verdana, sans-serif' },
+  verdana: { nombre: 'Verdana', css: 'Verdana, "DejaVu Sans", Tahoma, sans-serif' },
+  times: { nombre: 'Times', css: '"Times New Roman", Times, "Liberation Serif", serif' },
+  courier: { nombre: 'Courier', css: '"Courier New", Courier, "Liberation Mono", monospace' },
+};
+const ORDEN_LETRAS = ['arial', 'tahoma', 'verdana', 'times', 'courier'];
+const cssLetra = (k) => (LETRAS_ESCANEO[k] || LETRAS_ESCANEO.arial).css;
+let lienzoLetras = null;
+/** Lo que mide un texto, en puntos, con una de esas letras. */
+function anchoConLetra(texto, clave, tam, negrita) {
+  if (!lienzoLetras) lienzoLetras = document.createElement('canvas').getContext('2d');
+  lienzoLetras.font = (negrita ? 'bold ' : '') + '100px ' + cssLetra(clave);
+  return (lienzoLetras.measureText(String(texto || '')).width / 100) * tam;
+}
+
+/**
+ * Qué letra se parece más a la del renglón escaneado. Dos pistas, medidas en
+ * la propia foto:
+ *   · lo GRUESO del trazo: la Tahoma y la Verdana negritas son mucho más
+ *     gruesas que la Arial negrita (la ficha RUC de SUNAT, por ejemplo);
+ *   · lo ANCHO: con el mismo tamaño, la Verdana ocupa bastante más.
+ * Si nada lo dice claro, Arial, que es lo que se usaba siempre.
+ */
+function adivinarLetra(texto, med, tam, negrita) {
+  if (!med || !texto || !(med.ancho > 0) || !(tam > 0)) return 'arial';
+  const ajuste = (k) => Math.abs(anchoConLetra(texto, k, tam, negrita) / med.ancho - 1);
+  const gruesa = negrita && med.grosor / tam > 0.155;
+  if (gruesa) return ajuste('verdana') + 0.04 < ajuste('tahoma') ? 'verdana' : 'tahoma';
+  return ajuste('verdana') + 0.08 < ajuste('arial') ? 'verdana' : 'arial';
+}
+
 function letraDeRenglon(r) {
   let familia = 'Helvetica, Arial, sans-serif', negrita = false, cursiva = false, tam = r.size;
+  let clave = null;       // en un escaneo: qué letra de LETRAS_ESCANEO
   let base = r.y, color = r.color || [0, 0, 0];
   let x = r.deEscaneo ? r.bbox[0] : r.x;
   if (r.deEscaneo) {
@@ -849,7 +889,9 @@ function letraDeRenglon(r) {
       base = med.base;
       color = med.tinta || color;
       x = med.izquierda;
+      clave = adivinarLetra(r.texto, med, tam, negrita);
     } else {
+      clave = fila.familia || 'arial';
       negrita = !!fila.negrita;
       tam = fila.tam || (r.bbox[3] - r.bbox[1]) / Math.max(0.3, met.alto);
       base = fila.base != null ? fila.base : r.bbox[3] - met.abajo * tam;
@@ -863,7 +905,8 @@ function letraDeRenglon(r) {
     negrita = !!ras.negrita; cursiva = !!ras.cursiva;
   }
   const css = (c) => 'rgb(' + c.slice(0, 3).map((v) => Math.round(Math.max(0, Math.min(1, v)) * 255)).join(',') + ')';
-  return { familia, negrita, cursiva, tam, base, x, color: css(color) };
+  if (clave) familia = cssLetra(clave);
+  return { familia, clave, negrita, cursiva, tam, base, x, color: css(color) };
 }
 
 /** El color del papel junto a una caja de la hoja, sacado de lo dibujado. */
@@ -917,7 +960,7 @@ function campoSobreHoja(donde, letra, valor, ayudaTexto, alListo, alSalir) {
   cerrarCampo();
   const capa = $('#renglones');
   const desp = { dx: 0, dy: 0 };
-  const ajuste = { tam: letra.tam, negrita: !!letra.negrita, tinta: null };
+  const ajuste = { tam: letra.tam, negrita: !!letra.negrita, tinta: null, familia: letra.clave || null };
   const tocado = {};
   let tamPx = ajuste.tam * escala;
 
@@ -934,7 +977,8 @@ function campoSobreHoja(donde, letra, valor, ayudaTexto, alListo, alSalir) {
   };
   const ponerLetra = () => {
     tamPx = ajuste.tam * escala;
-    const fuente = (letra.cursiva ? 'italic ' : '') + (ajuste.negrita ? 'bold ' : '') + tamPx.toFixed(2) + 'px ' + letra.familia;
+    const familia = ajuste.familia ? cssLetra(ajuste.familia) : letra.familia;
+    const fuente = (letra.cursiva ? 'italic ' : '') + (ajuste.negrita ? 'bold ' : '') + tamPx.toFixed(2) + 'px ' + familia;
     campo.style.font = fuente;
     campo.style.color = ajuste.tinta ? aCss(ajuste.tinta) : letra.color;
     campo.style.height = (tamPx * 1.2) + 'px';
@@ -962,6 +1006,10 @@ function campoSobreHoja(donde, letra, valor, ayudaTexto, alListo, alSalir) {
   tamTexto.className = 'campo-tam';
   const pintarBarra = () => {
     tamTexto.textContent = ajuste.tam.toFixed(1).replace('.', ',') + ' pt';
+    if (bLetra) {
+      bLetra.textContent = LETRAS_ESCANEO[ajuste.familia].nombre;
+      bLetra.style.fontFamily = cssLetra(ajuste.familia);
+    }
     bNegrita.classList.toggle('activo', ajuste.negrita);
     barra.querySelectorAll('.campo-color').forEach((b) => b.classList.toggle('activo',
       b.dataset.i === (ajuste.tinta ? String(COLORES_A_MANO.findIndex((c) => c.rgb === ajuste.tinta)) : 'orig')));
@@ -976,6 +1024,12 @@ function campoSobreHoja(donde, letra, valor, ayudaTexto, alListo, alSalir) {
   barra.appendChild(tamTexto);
   boton('A+', 'Letra más grande (medio punto)', () => cambiar('tam', Math.min(72, Math.round((ajuste.tam + 0.5) * 100) / 100)), 'campo-mas');
   const bNegrita = boton('N', 'Negrita (Ctrl+B)', () => cambiar('negrita', !ajuste.negrita), 'campo-negrita');
+  // la letra: solo en un escaneo, donde lo corregido se dibuja en la foto
+  // y puede ir con cualquiera; cada clic pasa a la siguiente
+  const bLetra = letra.clave ? boton('', 'Tipo de letra (clic para cambiar)', () => {
+    const i = ORDEN_LETRAS.indexOf(ajuste.familia);
+    cambiar('familia', ORDEN_LETRAS[(i + 1) % ORDEN_LETRAS.length]);
+  }, 'campo-letra') : null;
   const sep = document.createElement('span');
   sep.className = 'campo-sep';
   barra.appendChild(sep);
@@ -1053,8 +1107,11 @@ function campoSobreHoja(donde, letra, valor, ayudaTexto, alListo, alSalir) {
       if (tocado.tam && Math.abs(ajuste.tam - letra.tam) > 0.01) aj.tam = ajuste.tam;
       if (tocado.negrita && ajuste.negrita !== !!letra.negrita) aj.negrita = ajuste.negrita;
       if (tocado.tinta && ajuste.tinta) aj.tinta = ajuste.tinta.slice();
+      // la letra adivinada también viaja: es lo que se vio al escribir
+      if (ajuste.familia) aj.familia = ajuste.familia;
       cerrarCampo();
-      alListo(v, d, Object.keys(aj).length ? aj : null);
+      const tocoAlgo = Object.keys(aj).some((k) => k !== 'familia') || (tocado.familia && ajuste.familia !== letra.clave);
+      alListo(v, d, tocoAlgo ? aj : (aj.familia ? { familia: aj.familia, soloLetra: true } : null));
     }
     if (ev.key === 'Escape') { ev.preventDefault(); cerrarCampo(); if (alSalir) alSalir(); }
   });
@@ -2226,7 +2283,7 @@ function componerParche(parche, fila, suavidad) {
   ctx.putImageData(fondo, 0, 0);
 
   const tam = (fila.tam || 10) * A;
-  ctx.font = (fila.negrita ? 'bold ' : '') + tam.toFixed(2) + 'px Helvetica, Arial, sans-serif';
+  ctx.font = (fila.negrita ? 'bold ' : '') + tam.toFixed(2) + 'px ' + cssLetra(fila.familia);
   const [r, g, b] = fila.tinta || [0, 0, 0];
   ctx.fillStyle = 'rgb(' + Math.round(r * 255) + ',' + Math.round(g * 255) + ',' + Math.round(b * 255) + ')';
   ctx.textBaseline = 'alphabetic';
@@ -2429,10 +2486,12 @@ function cambiarRenglon(indice, textoNuevo, desp, aj) {
 function aplicar(indice, textoNuevo, desp, aj) {
   const r = renglones[indice];
   const movido = !!(desp && textoNuevo && (desp.dx || desp.dy));
-  const ajustado = !!(aj && textoNuevo);
+  // (la letra que el editor adivinó viaja sola, con soloLetra: no cuenta
+  // como un ajuste a mano)
+  const ajustado = !!(aj && textoNuevo && !aj.soloLetra);
   if (textoNuevo === r.texto && !movido && !ajustado) return;
   // sin texto, el cambio es borrar el renglón: se quita del archivo de verdad
-  hacerCambio(() => cambiarRenglon(indice, textoNuevo, movido ? desp : null, ajustado ? aj : null), r.texto, textoNuevo);
+  hacerCambio(() => cambiarRenglon(indice, textoNuevo, movido ? desp : null, aj && textoNuevo ? aj : null), r.texto, textoNuevo);
 }
 
 function insertar(x, y, texto, aj) {
@@ -2537,10 +2596,15 @@ function reescribirEnEscaneo(indice, textoNuevo, desp, aj) {
   // Si el texto nuevo no cabe en el hueco del viejo pero a la derecha hay
   // papel limpio, se usa: el parche se alarga hasta ahí (midiendo de nuevo
   // con la caja más ancha) y el texto va a su tamaño, sin apretarlo.
+  // la letra: la elegida en el campo; si no, la que se parece a la del
+  // renglón (medida con el renglón ORIGINAL, no con lo que se escribe)
+  const familiaAntes = fila.familia;
+  if (aj && aj.familia) fila.familia = aj.familia;
+  else if (!fila.familia && med) fila.familia = adivinarLetra(antes, med, fila.tam, fila.negrita);
   if (med && textoNuevo && med.libre > 0) {
     const tamN = aj && aj.tam != null ? aj.tam : fila.tam;
     const negN = aj && aj.negrita != null ? aj.negrita : fila.negrita;
-    const hace = medirAncho(new Font(negN ? 'Helvetica-Bold' : 'Helvetica'), comoQuedara(textoNuevo).texto, tamN);
+    const hace = anchoConLetra(comoQuedara(textoNuevo).texto, fila.familia, tamN, negN);
     const falta = hace - fila.hueco + tamN * 0.2;
     const extra = Math.min(falta, med.libre - tamN * 0.5);
     if (falta > 0 && extra > 0.5) {
@@ -2590,6 +2654,7 @@ function reescribirEnEscaneo(indice, textoNuevo, desp, aj) {
     fila.t = antes; fila.editado = eraEditado; fila.borrado = eraBorrado;
     fila.x = xAntes; fila.base = baseAntes;
     Object.assign(fila, letraAntes);
+    fila.familia = familiaAntes;
     return { ok: false, motivo };
   };
 
@@ -2611,7 +2676,7 @@ function reescribirEnEscaneo(indice, textoNuevo, desp, aj) {
   bytesActuales = salida;
   abrirBytes(salida, nombre);
   return { ok: true, sobreFoto: true, borrado: !textoNuevo, cambiadas: queda.perdidas,
-           movido: !!(desp && (desp.dx || desp.dy)), ajustado: !!aj };
+           movido: !!(desp && (desp.dx || desp.dy)), ajustado: !!(aj && !aj.soloLetra) };
 }
 
 
@@ -2692,6 +2757,7 @@ function reescribir(indice, textoNuevo, desp, aj) {
   // lo ajustado a mano va para el renglón entero. La negrita no se puede
   // sacar de la tipografía del documento si esta no la trae: se pide la de
   // serie de su misma familia, con o sin negrita.
+  if (aj && aj.soloLetra) aj = null;   // en una hoja de texto, la letra es la del documento
   if (aj) {
     for (const t of piezas) {
       if (aj.tam != null) t.size = aj.tam;
@@ -2809,7 +2875,7 @@ function reescribir(indice, textoNuevo, desp, aj) {
   bytesActuales = salida;
   abrirBytes(salida, nombre);
   const dueña = cambiada || piezas[0];
-  return { ok: true, encogido, desvio, movido: !!(dx || dy), ajustado: !!aj,
+  return { ok: true, encogido, desvio, movido: !!(dx || dy), ajustado: !!(aj && !aj.soloLetra),
            cambiadas: [...new Set(piezas.flatMap((t) => t.f.perdidas))],
            propia: !!(dueña && dueña.f.propia),
            tipografia: dueña && dueña.f.sustituida ? dueña.f.nombre : '',
@@ -2846,6 +2912,15 @@ function letraParaInsertar(x, y) {
   const color = (cerca && cerca.color) || [0, 0, 0];
   const elegida = resolverFuente(cerca ? cerca.fuente : 'Helvetica', cerca ? cerca.rasgos : null);
   return { cerca, tam, color, elegida, negrita: !!(cerca && cerca.rasgos && cerca.rasgos.negrita) };
+}
+
+/** En un escaneo, la letra del renglón más cercano: la que ya se le puso
+ *  o, si no se ha corregido, la que se le adivina midiéndolo en la foto. */
+function letraEscaneoCerca(modelo, cerca) {
+  const fila = cerca && cerca.deEscaneo && modelo && modelo.renglones[cerca.enModelo];
+  if (!fila) return 'arial';
+  if (LETRAS_ESCANEO[fila.familia]) return fila.familia;
+  return letraDeRenglon(cerca).clave || 'arial';
 }
 
 function insertarRenglon(x, y, texto, aj) {
@@ -2921,10 +2996,11 @@ function insertarEnEscaneo(pagina, modelo, marco, x, y, texto, aj) {
   const tam = aj && aj.tam != null ? aj.tam : l.tam;
   const color = aj && aj.tinta ? aj.tinta : l.color;
   const negrita = aj && aj.negrita != null ? aj.negrita : l.negrita;
+  const familia = (aj && aj.familia) || letraEscaneoCerca(modelo, l.cerca);
   const met = metricaDe(texto);
-  const ancho = Math.max(2, medirAncho(new Font(negrita ? 'Helvetica-Bold' : 'Helvetica'), texto, tam));
+  const ancho = Math.max(2, anchoConLetra(texto, familia, tam, negrita));
   modelo.renglones.push({
-    t: texto, insertado: true,
+    t: texto, insertado: true, familia,
     x, base: y, tam, negrita, tinta: color, hueco: ancho,
     x0: x, x1: x + ancho,
     y0: y - met.arriba * tam, y1: y + met.abajo * tam,
@@ -3186,10 +3262,17 @@ function campoInsertar(xHoja, yHoja) {
       : 'Helvetica, Arial, sans-serif',
     negrita: !!l.negrita, cursiva: !!ras.cursiva, tam: l.tam, base: yHoja, color: css(l.color),
   };
+  // en un escaneo, con la letra del renglón de al lado, y se puede cambiar
+  const modelo = modeloDe(doc.loadPage(paginaActual));
+  if (modelo && modelo.ocr !== false) {
+    letra.clave = letraEscaneoCerca(modelo, cerca);
+    letra.familia = cssLetra(letra.clave);
+  }
   const campo = campoSobreHoja(
     { x: xHoja, base: yHoja, tapa: null, papel: 'transparent' },
     letra, '',
-    'Se escribirá en ' + (cerca ? sinPrefijo(cerca.fuente) : l.elegida.nombre) + ' de ' + l.tam.toFixed(1) + ' pt'
+    'Se escribirá en ' + (letra.clave ? LETRAS_ESCANEO[letra.clave].nombre : cerca ? sinPrefijo(cerca.fuente) : l.elegida.nombre)
+      + ' de ' + l.tam.toFixed(1) + ' pt'
       + ' · Enter: poner · Esc: dejar · ⠇ o Alt + flechas: mover',
     (v, desp, aj) => { modoInsertar(false); if (v.trim()) insertar(xHoja + desp.dx, yHoja + desp.dy, v, aj); },
     () => modoInsertar(false));
