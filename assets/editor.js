@@ -1154,14 +1154,18 @@ function medirRenglon(pagina, caja) {
      letras llena casi todo el ancho, y tomándola por raya la letra se medía
      más chica y el papel que tapa lo viejo no llegaba hasta abajo. Entre
      letra y letra siempre hay un hueco; en una raya, no. */
+  // Además del largo, lo MACIZA que es: en letra negrita y chica los huecos
+  // entre letras son de uno o dos puntos, igual que los cortes del grano en
+  // una raya escaneada; lo que las distingue es que la raya es tinta casi
+  // de punta a punta y la fila de letras, no.
   const oscuraEnFila = new Int32Array(al);
   const seguidaEnFila = new Int32Array(al);
   for (let y = 0; y < al; y++) {
-    let n = 0, racha = 0, mejor = 0, hueco = 0;
+    let n = 0, racha = 0, tinta = 0, mejor = 0, hueco = 0;
     for (let x = 0; x < an; x++) {
-      if (lum[y * an + x] < umbral) { n++; racha += hueco + 1; hueco = 0; }
-      else if (racha && ++hueco > 2) { racha = 0; hueco = 0; }   // un escaneo corta la raya a trozos de uno o dos puntos
-      if (racha > mejor) mejor = racha;
+      if (lum[y * an + x] < umbral) { n++; racha += hueco + 1; tinta++; hueco = 0; }
+      else if (racha && ++hueco > 2) { racha = 0; tinta = 0; hueco = 0; }   // un escaneo corta la raya a trozos de uno o dos puntos
+      if (racha > mejor && tinta >= racha * 0.92) mejor = racha;
     }
     oscuraEnFila[y] = n;
     seguidaEnFila[y] = mejor;
@@ -1853,6 +1857,52 @@ function textoCorregidos(c) {
 }
 
 const enGrados = (g) => Math.abs(g).toFixed(1).replace('.', ',') + '°';
+
+/**
+ * Una hoja leída con una versión anterior del editor guarda su lectura
+ * dentro del archivo y no se vuelve a leer sola: si aquella versión juntaba
+ * las celdas de un cuadro en un renglón, así se quedaban. Esto la borra y
+ * lee otra vez. Solo en una hoja sin correcciones: las correcciones viven
+ * en esa misma capa y se perderían.
+ */
+async function volverALeer() {
+  if (!doc) return;
+  const pagina = doc.loadPage(paginaActual);
+  const modelo = modeloDe(pagina);
+  if (!modelo) { reconocerHoja(); return; }
+  const tocada = modelo.renglones.some((r) => r.editado || r.borrado || r.insertado) || (modelo.tachados || []).length;
+  if (tocada) {
+    avisar('Esta hoja ya tiene correcciones y se perderían. Deshazlas antes, o abre el documento sin corregir y vuelve a leerlo.', 'mal');
+    return;
+  }
+  const respaldo = bytesActuales;
+  cargando(true, 'Borrando la lectura de antes…');
+  try {
+    const objPag = pagina.getObject();
+    quitarCapa(objPag);
+    objPag.delete(CLAVE_MODELO);
+    bytesActuales = bytesDe(doc);
+    abrirBytes(bytesActuales, nombre);
+    reconocidos.delete(paginaActual);
+    const r = await leerYPonerTexto(paginaActual, (t, avance) =>
+      cargando(true, t + (avance ? ' ' + Math.round(avance * 100) + '%' : '')));
+    pila.push({ bytes: respaldo, cambios: cambios.slice() });
+    $('#btnDeshacer').disabled = false;
+    cargando(false);
+    dibujar();
+    descargado = false;
+    apuntarTrabajo();
+    avisar(r.vacia ? 'Se volvió a leer, pero no se reconoció ninguna palabra.'
+      : `Leída otra vez: ${r.salida.renglones.length} renglones.` + textoCorregidos(r.corregidos), r.vacia ? 'mal' : 'bien');
+  } catch (e) {
+    console.error(e);
+    bytesActuales = respaldo;
+    abrirBytes(respaldo, nombre);
+    cargando(false);
+    dibujar();
+    avisar('No se pudo volver a leer: ' + e.message, 'mal');
+  }
+}
 
 async function reconocerHoja() {
   if (!doc) return;
@@ -3629,6 +3679,7 @@ $('#cargaDetener').addEventListener('click', () => {
 });
 $('#btnDeshacer').addEventListener('click', deshacer);
 $('#btnReconocer').addEventListener('click', reconocerHoja);
+$('#btnReleer').addEventListener('click', volverALeer);
 $('#btnReconocerTodas').addEventListener('click', reconocerTodasBoton);
 $('#btnReconocerTodas2').addEventListener('click', reconocerTodasBoton);
 $('#btnCopiarTexto').addEventListener('click', async () => {

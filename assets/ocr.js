@@ -112,6 +112,92 @@ function partirPorCeldas(ws, columnas) {
 }
 
 /**
+ * Parte una fila por los HUECOS grandes entre palabras.
+ *
+ * Muchos cuadros no tienen rayas entre columnas —la ficha RUC de SUNAT, un
+ * cuadro comparativo impreso por un sistema—: las columnas se separan solo
+ * con espacio en blanco. El reconocedor lee la fila de lado a lado como un
+ * renglón, y entonces corregir una celda reescribía la fila entera, encima
+ * de las demás columnas. Entre dos palabras de una frase hay un espacio de
+ * una fracción de la altura de la letra; entre dos columnas, bastante más.
+ * Pero el hueco solo no basta: en la ficha de SUNAT «ALT. KM 38» y
+ * «ALQUILADO» están a una letra de distancia, lo mismo que las dos mitades
+ * de «POSTOR A · COMERCIAL SAN JOSE» cuando el reconocedor no ve el punto.
+ * Lo que distingue un cuadro es que sus columnas se ALINEAN: el blanco
+ * entre dos columnas sigue en las filas de arriba y de abajo, como un
+ * pasillo; el de una frase no, arriba hay letras. Así que:
+ *   · un hueco de más de HUECO_SEGURO letras se corta siempre;
+ *   · uno de más de HUECO_COLUMNA, solo si `pasillo` dice que otras líneas
+ *     de alrededor también están en blanco justo ahí.
+ *
+ * Y se corta también donde la palabra siguiente no está a la misma altura:
+ * en una celda de dos líneas («LIMA LIMA PUNTA» / «HERMOSA») pegada a otra
+ * de una sola, centrada, el reconocedor junta la primera línea de una con
+ * la línea de la otra, y ese renglón mezclado se medía al doble de tamaño.
+ */
+const HUECO_COLUMNA = 0.8;
+const HUECO_SEGURO = 1.6;
+const SEGURA = 30;   // de 100: por debajo, el reconocedor no está seguro de la palabra
+
+function partirPorHuecos(ws, pasillo) {
+  if (ws.length < 2) return [deLasPalabras(ws)];
+  let orden = ws.slice().sort((a, b) => a.bbox.x0 - b.bbox.x0);
+  const altos = orden.map((w) => w.bbox.y1 - w.bbox.y0).sort((a, b) => a - b);
+  const alto = altos[altos.length >> 1];
+  // Una «palabra» casi el doble de alta que las demás de su línea abarca dos
+  // líneas del papel: es una lectura mala, y metida en el renglón lo hace
+  // medir el doble. Se deja fuera; la segunda lectura, la dispersa, trae
+  // esas palabras bien.
+  if (orden.length >= 3) orden = orden.filter((w) => w.bbox.y1 - w.bbox.y0 <= alto * 1.8);
+  if (!orden.length) return [];
+  // La raya ALTA que el reconocedor se inventa en el hueco entre dos celdas
+  // («—» del doble de alto que la letra) no sirve de puente: el hueco se
+  // mide desde lo anterior a ella. Un guion de verdad («SOL - SUNAT») es
+  // bajito y sí une.
+  const deVerdad = (w) => /[\p{L}\p{N}]/u.test(w.text || '');
+  const puenteFalso = (w) => !deVerdad(w) && (w.bbox.y1 - w.bbox.y0) > alto * 1.3;
+  const centro = (w) => (w.bbox.y0 + w.bbox.y1) / 2;
+  const grupos = [[orden[0]]];
+  for (let i = 1; i < orden.length; i++) {
+    const w = orden[i];
+    const ultimo = grupos[grupos.length - 1];
+    const previo = ultimo[ultimo.length - 1];
+    const ref = [...ultimo].reverse().find((x) => !puenteFalso(x)) || previo;
+    const hueco = w.bbox.x0 - ref.bbox.x1;
+    const desnivel = Math.abs(centro(w) - centro(ref));
+    const corta = hueco > alto * HUECO_SEGURO
+      || (hueco > alto * HUECO_COLUMNA && pasillo && pasillo(ref.bbox.x1, w.bbox.x0, alto));
+    if (corta || desnivel > alto * 0.55) grupos.push([w]);
+    else ultimo.push(w);
+  }
+  // los signos sueltos que quedan en el borde de una celda son el ruido del
+  // hueco: se quitan, o harían de puente al volver a juntar trozos
+  // Las palabras dudosas vienen aquí también: una palabra mal leída en
+  // medio de una celda sigue siendo tinta de esa celda, y si se deja fuera
+  // la caja no la cubre y al corregir la celda se queda en la foto («G05B»
+  // leído «cose» salía dos veces). Pero una celda hecha SOLO de dudosas es
+  // ruido o una lectura mala de algo que la segunda pasada lee mejor.
+  // En el borde de la celda, una dudosa se queda si parece una palabra de
+  // verdad —letras o cifras, dos o más, y del alto de las demás—; si no, es
+  // ruido del hueco.
+  const pareceDeVerdad = (w) => deVerdad(w) && (w.text || '').trim().length >= 2
+    && (w.bbox.y1 - w.bbox.y0) >= alto * 0.6 && (w.bbox.y1 - w.bbox.y0) <= alto * 1.4;
+  const valeEnBorde = (w) => w.confidence >= SEGURA ? deVerdad(w) : pareceDeVerdad(w);
+  // (solo en los bordes que deja un corte: los extremos del renglón entero
+  // se quedan como estaban, con su puntuación)
+  const partida = grupos.length > 1;
+  return grupos.filter((g) => g.some((w) => w.confidence >= SEGURA && deVerdad(w))).map((g, i, todos) => {
+    let a = 0, b = g.length;
+    if (partida && i > 0) while (a < b && !valeEnBorde(g[a])) a++;
+    else while (a < b && g[a].confidence < SEGURA) a++;
+    if (partida && i < todos.length - 1) while (b > a && !valeEnBorde(g[b - 1])) b--;
+    else while (b > a && g[b - 1].confidence < SEGURA && !pareceDeVerdad(g[b - 1])) b--;
+    // dentro, entre palabras seguras, se queda todo lo que tenga letras
+    return g.slice(a, b).filter((w) => deVerdad(w) || w.confidence >= SEGURA);
+  }).filter((g) => g.length).map(deLasPalabras);
+}
+
+/**
  * ¿Este renglón está dentro de un cuadro? Lo que lo dice de verdad no son
  * las rayas verticales —un palo de letra o un logo dan tiradas parecidas—
  * sino que esté ENCERRADO entre dos rayas horizontales próximas. Un párrafo
@@ -134,11 +220,34 @@ function enCuadro(r, filas) {
 function renglonesDe(data, columnas, filas) {
   const salida = [];
   let palabras = 0;
-  for (const b of data.blocks || []) {
-    for (const p of b.paragraphs || []) {
-      for (const l of p.lines || []) {
+  const lineas = [];
+  for (const b of data.blocks || []) for (const p of b.paragraphs || []) for (const l of p.lines || []) lineas.push(l);
+  // Las cajas de las palabras de cada línea, para ver si un hueco es un
+  // PASILLO: si al menos otras dos líneas cercanas que pasan por ahí
+  // tienen también blanco justo en ese sitio.
+  const cajas = lineas.map((l) => (l.words || []).filter((w) => /[\p{L}\p{N}]/u.test(w.text || '')).map((w) => w.bbox));
+  const pasilloDe = (li) => (x0, x1, alto) => {
+    const yo = cajas[li];
+    if (!yo.length) return false;
+    const cy = (Math.min(...yo.map((c) => c.y0)) + Math.max(...yo.map((c) => c.y1))) / 2;
+    const medio0 = x0 + (x1 - x0) * 0.25, medio1 = x1 - (x1 - x0) * 0.25;
+    let blancas = 0;
+    for (let j = 0; j < cajas.length && blancas < 2; j++) {
+      if (j === li || !cajas[j].length) continue;
+      const cs = cajas[j];
+      const cyj = (Math.min(...cs.map((c) => c.y0)) + Math.max(...cs.map((c) => c.y1))) / 2;
+      if (Math.abs(cyj - cy) > alto * 10) continue;
+      // la línea tiene que pasar por ahí: si acaba antes, no dice nada
+      if (Math.min(...cs.map((c) => c.x0)) > medio0 || Math.max(...cs.map((c) => c.x1)) < medio1) continue;
+      if (!cs.some((c) => c.x1 > medio0 && c.x0 < medio1)) blancas++;
+    }
+    return blancas >= 2;
+  };
+  lineas.forEach((l, li) => {
+    {
+      {
         const buenas = (l.words || []).filter((w) => (w.text || '').trim() && w.confidence >= 30);
-        if (!buenas.length) continue;
+        if (!buenas.length) return;
         palabras += buenas.length;
         // solo se parte si la fila CRUZA alguna raya: así los párrafos
         // normales, que no están en ningún cuadro, se quedan enteros
@@ -146,11 +255,14 @@ function renglonesDe(data, columnas, filas) {
         const cruza = enCuadro(entero, filas)
           ? (columnas || []).filter((c) => c > entero.x0 + 4 && c < entero.x1 - 4)
           : [];
-        const trozos = cruza.length ? partirPorCeldas(buenas, cruza) : [entero];
+        // sin rayas: se parte por los huecos, con todas las palabras (las
+        // dudosas solo se quedan si van en medio de palabras seguras)
+        const todas = (l.words || []).filter((w) => (w.text || '').trim());
+        const trozos = cruza.length ? partirPorCeldas(buenas, cruza) : partirPorHuecos(todas, pasilloDe(li));
         trozos.forEach((t) => { if (!esRuido(t)) salida.push(t); });
       }
     }
-  }
+  });
   return { renglones: salida, palabras };
 }
 

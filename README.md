@@ -41,6 +41,19 @@ Sirve también para mover un renglón **sin cambiarle el texto**, o uno que ya
 corregiste: pulsa sobre él, muévelo y `Enter`. En una hoja escaneada, lo viejo
 sigue tapado en su sitio y el texto nuevo va donde lo pongas.
 
+### Cuadros sin rayas entre columnas
+Muchas fichas —la de RUC de SUNAT, un reporte impreso por un sistema— tienen
+columnas separadas solo por espacio en blanco. Al leer, el editor parte cada
+fila en sus celdas: donde hay un hueco muy grande entre palabras, y donde hay
+un hueco mediano que además se repite en las filas de arriba y de abajo, como
+un pasillo en blanco. Una frase normal no se parte. Así cada celda se corrige
+sola, sin reescribir la fila entera encima de las demás columnas, y las
+celdas de dos líneas no se mezclan con las de al lado.
+
+Una hoja leída con una versión anterior guarda su lectura dentro del archivo.
+Para que se lea de nuevo, en «Texto reconocido» está **Volver a leer esta
+hoja** (solo si la hoja no tiene correcciones, que se perderían; se deshace).
+
 ### Si el renglón nuevo es más largo
 En una hoja escaneada, si lo que escribes no cabe en el sitio de lo viejo, el
 editor mira si a la derecha hay papel limpio —sin otra palabra, sin la raya
@@ -427,6 +440,9 @@ node pruebas/hacer-corto.mjs  # rehace la hoja de renglones cortos en negrita
 node pruebas/corto.mjs        # corregir renglones cortos en negrita: su tamaño,
                               # sin restos de lo viejo, añadir al final, usar el
                               # papel libre de la derecha y respetar las celdas
+node pruebas/hacer-ficha.mjs  # rehace la ficha inventada con cuadro sin rayas
+node pruebas/ficha.mjs        # cada celda su renglón, de su tamaño; corregir
+                              # una sin tocar las demás; volver a leer
 node pruebas/todas.mjs        # todas, una detrás de otra
 node pruebas/corregir-escaneo.mjs   # corregir un renglón de una foto: comprueba
                                     # que la FOTO también cambia, volviéndola a
