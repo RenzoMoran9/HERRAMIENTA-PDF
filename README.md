@@ -1,10 +1,10 @@
-# Grapa · Editor de texto
+# Pdflash · Editor de texto
 
 Corrige el texto de un PDF **dentro del propio archivo**: no tapa la palabra vieja
 con un recuadro blanco, la quita de verdad y escribe la nueva en la misma línea
 base, con la misma tipografía, el mismo tamaño y el mismo color.
 
-Es el compañero de [Grapa](https://github.com/RenzoMoran9/GRAPA). Grapa arma el
+Es el compañero de [Pdflash](https://github.com/RenzoMoran9/GRAPA). Pdflash arma el
 expediente; el Editor arregla una palabra suelta cuando hace falta.
 
 ---
@@ -15,8 +15,8 @@ expediente; el Editor arregla una palabra suelta cuando hace falta.
 **al lado de `Grapa.html`** y ábrelo con doble clic. Es un solo archivo: funciona
 sin internet y sin servidor.
 
-Desde Grapa, el botón **Editar texto** lo abre y le pasa el documento; al
-terminar, **Devolver a Grapa** lo manda de vuelta corregido. El documento viaja
+Desde Pdflash, el botón **Editar texto** lo abre y le pasa el documento; al
+terminar, **Devolver a Pdflash** lo manda de vuelta corregido. El documento viaja
 de una pestaña a otra, en memoria: no se sube a ningún sitio.
 
 También sirve suelto: arrastra un PDF encima y listo.
@@ -97,7 +97,7 @@ dice antes de escribir— para que no cante al lado de lo que ya estaba. Donde
 pulsas es la línea base, y el texto queda ahí con menos de 2 pt de desvío.
 
 En una hoja escaneada sin reconocer no hay dónde insertar: primero **Reconocer
-el texto**, o usa **Sello y marcas** en Grapa, que escribe encima sin tocar el
+el texto**, o usa **Sello y marcas** en Pdflash, que escribe encima sin tocar el
 escaneo.
 
 ### Tachar un DNI, una cuenta o un nombre
@@ -134,7 +134,7 @@ Qué no hace todavía:
   archivo**, en sus **propiedades** (título, autor) o en un **comentario**
   pegado al PDF, eso no lo toca.
 - **Deshacer** devuelve lo tachado mientras el editor sigue abierto. Una vez
-  descargado o devuelto a Grapa, el archivo ya sale sin el dato.
+  descargado o devuelto a Pdflash, el archivo ya sale sin el dato.
 
 ### Hojas giradas
 
@@ -164,7 +164,7 @@ apagar: **Guardar mi trabajo en este equipo**, abajo en la columna izquierda.
 Apagarlo borra en el acto lo que hubiera guardado, que en un ordenador
 compartido no es cosa menor.
 
-Y si intentas cerrar con cambios que no has descargado ni devuelto a Grapa, el
+Y si intentas cerrar con cambios que no has descargado ni devuelto a Pdflash, el
 navegador pregunta antes.
 
 ### Buscar y reemplazar
@@ -276,7 +276,7 @@ el motor y el idioma viajan dentro del propio archivo.
 Antes de leer, el editor prepara la hoja:
 
 - **La endereza si entró torcida** (hasta unos 8°). Mide el giro con el que
-  los renglones quedan más limpios, como **Revisar** en Grapa, y gira la hoja
+  los renglones quedan más limpios, como **Revisar** en Pdflash, y gira la hoja
   de verdad en el documento: la foto no se vuelve a dibujar, solo se gira,
   así que no pierde calidad. Lo avisa («La hoja estaba torcida 2,5°: se
   enderezó») y **Deshacer** la deja como llegó. La que está derecha no se toca.
@@ -319,16 +319,16 @@ perder lo ya leído. Al acabar dice cuántas leyó y en cuánto tiempo. Las hoja
 que ya tienen texto o ya se reconocieron no se vuelven a leer, y un solo
 **Deshacer** quita todo lo de esa lectura.
 
-Desde Grapa, **Hacer buscables** (en «Buscar») manda todas las hojas
+Desde Pdflash, **Hacer buscables** (en «Buscar») manda todas las hojas
 escaneadas del expediente de una vez: el editor las lee seguidas, con la
-cuenta de «Hoja 3 de 12» y un botón **Detener**, se las devuelve a Grapa y
+cuenta de «Hoja 3 de 12» y un botón **Detener**, se las devuelve a Pdflash y
 se cierra solo. Las hojas que ya tienen texto o ya se reconocieron no se
 vuelven a leer.
 
 ### Y después se puede corregir
 
 Una vez reconocida, la hoja **sí se corrige**: pulsas un renglón, escribes, y
-Grapa lo sustituye copiándole al original todo lo que se puede medir sobre la
+Pdflash lo sustituye copiándole al original todo lo que se puede medir sobre la
 propia imagen:
 
 | Se mide en el renglón original | Para qué |
@@ -372,10 +372,10 @@ Lo importante es que cambian **las dos cosas a la vez**: lo que se ve y lo que
 se busca. Si solo se tocara la capa invisible, el documento mostraría una cifra
 y copiaría otra —eso no sería un documento corregido, sería uno roto—.
 
-Todo lo que Grapa añade vive en **una sola capa**, junto con un modelo guardado
+Todo lo que Pdflash añade vive en **una sola capa**, junto con un modelo guardado
 dentro de la propia hoja. La foto original nunca se modifica: lo que tapa es un
 recuadro nuestro. Y como el modelo viaja en el archivo, la hoja se puede seguir
-corrigiendo después de guardarla, cerrarla o pasarla por Grapa.
+corrigiendo después de guardarla, cerrarla o pasarla por Pdflash.
 
 Los trozos que el reconocimiento parte se vuelven a juntar **por el hueco**:
 dentro de una celda, de una palabra a la siguiente hay un espacio pequeño; de
@@ -484,5 +484,5 @@ El texto completo está en [`LICENSE`](LICENSE); el aviso original de MuPDF, en
 > abras aquí son tuyos y no salen de tu equipo: el editor no tiene servidor, no
 > envía nada y funciona sin internet.
 
-Grapa, en cambio, no lleva MuPDF dentro: solo abre este editor en otra pestaña.
-Por eso Grapa sigue siendo un programa aparte y no queda sujeto a esta licencia.
+Pdflash, en cambio, no lleva MuPDF dentro: solo abre este editor en otra pestaña.
+Por eso Pdflash sigue siendo un programa aparte y no queda sujeto a esta licencia.

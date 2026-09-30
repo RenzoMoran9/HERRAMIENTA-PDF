@@ -1,5 +1,5 @@
 /* ===========================================================
-   Grapa · Editor de texto
+   Pdflash · Editor de texto
    Todo ocurre dentro del navegador: el documento no sale del
    equipo, no hay servidor y no hace falta internet.
    =========================================================== */
@@ -21,7 +21,7 @@ let renglones = [];         // los del folio que se está viendo
 let pila = [];              // para deshacer: { bytes, nombre, resumen }
 let cambios = [];           // lo que se le muestra al usuario
 let contadorFuente = 0;
-let grapa = null;           // la ventana de Grapa, si vino de allí
+let grapa = null;           // la ventana de Pdflash, si vino de allí
 const reconocidos = new Map();  // lo que dijo el OCR, por hoja
 let tachas = [];            // { hoja, caja: [x0, y0, x1, y1] } · lo que se va a tachar
 let tachando = false;       // ¿se están marcando zonas para tachar?
@@ -1473,7 +1473,7 @@ const PPP_OCR = 200;
    Un escaneo casi nunca entra derecho, y unos pocos grados bastan para que
    el reconocimiento parta los renglones y confunda letras: los números
    largos, como un RUC, son lo primero que se pierde. Antes de leer se mide
-   cuánto está torcida —como hace Grapa en «Revisar»: el giro con el que la
+   cuánto está torcida —como hace Pdflash en «Revisar»: el giro con el que la
    tinta se amontona en renglones más limpios— y, si lo está, se endereza la
    hoja DE VERDAD en el documento. Así lo leído, lo que luego se corrija y
    lo que se ve van derechos y a la vez. */
@@ -2009,7 +2009,7 @@ function hojasPorLeer() {
     const pagina = doc.loadPage(n);
     const modelo = modeloDe(pagina);
     if (modelo && modelo.ocr !== false) continue;
-    // lo mismo que cuenta Grapa al buscar: con menos de 20 letras es una
+    // lo mismo que cuenta Pdflash al buscar: con menos de 20 letras es una
     // foto con algún resto suelto (un número, una marca), no una hoja de texto
     const letras = leerRenglones(pagina).reduce((a, r) => a + String(r.texto || '').replace(/\s/g, '').length, 0);
     if (letras >= 20) continue;
@@ -2120,7 +2120,7 @@ async function reconocerTodas() {
 }
 
 /**
- * Lo que pide Grapa con «Hacer buscables»: leer todas las hojas escaneadas
+ * Lo que pide Pdflash con «Hacer buscables»: leer todas las hojas escaneadas
  * y devolvérselas. Aquí no hay nada que decidir, así que al terminar se
  * devuelve solo y la pestaña se cierra.
  */
@@ -2130,23 +2130,23 @@ async function hacerBuscableParaGrapa() {
     res = await reconocerTodas();
   } catch (e) {
     console.error(e);
-    avisar('No se pudo reconocer: ' + e.message + '. No se devolvió nada a Grapa.', 'mal');
+    avisar('No se pudo reconocer: ' + e.message + '. No se devolvió nada a Pdflash.', 'mal');
     return;
   }
   if (res.detenido && !res.leidas) {
-    avisar('Detenido. No se devolvió nada a Grapa.', '');
+    avisar('Detenido. No se devolvió nada a Pdflash.', '');
     return;
   }
-  // la pestaña se cierra sola: lo que habría dicho el aviso lo dice Grapa
+  // la pestaña se cierra sola: lo que habría dicho el aviso lo dice Pdflash
   devolver({ tarea: 'buscable', leidas: res.leidas, vacias: res.vacias, total: res.total,
              enderezadas: res.enderezadas, corregidos: res.corregidos });
-  avisar(`Listo: ${res.leidas} hoja(s) ya se pueden buscar. Vuelve a la pestaña de Grapa.`, 'bien');
+  avisar(`Listo: ${res.leidas} hoja(s) ya se pueden buscar. Vuelve a la pestaña de Pdflash.`, 'bien');
   if (!res.detenido) setTimeout(() => { try { window.close(); } catch (e) {} }, 1500);
 }
 
-/* ---------- la capa de Grapa sobre una hoja escaneada ----------
+/* ---------- la capa de Pdflash sobre una hoja escaneada ----------
 
-   Todo lo que Grapa pone encima de la foto vive en UN solo flujo, que se
+   Todo lo que Pdflash pone encima de la foto vive en UN solo flujo, que se
    reescribe entero en cada cambio, y en un modelo guardado dentro de la
    propia hoja. Así:
 
@@ -2155,7 +2155,7 @@ async function hacerBuscableParaGrapa() {
        todo bajo una matriz de 0,24— eso metía nuestro texto dentro de esa
        matriz: acababa a un cuarto de tamaño y en otro sitio;
      · el modelo viaja dentro del archivo, así que la hoja se puede seguir
-       corrigiendo después de guardarla, cerrarla o pasarla por Grapa;
+       corrigiendo después de guardarla, cerrarla o pasarla por Pdflash;
      · los renglones sin tocar siguen invisibles —solo para buscar— y los
        corregidos se ven, porque se tapa su zona y se escribe encima.     */
 
@@ -3305,7 +3305,7 @@ $('#btnInsertar').addEventListener('click', () => modoInsertar(!insertando));
        hoja se queda dentro del PDF como un objeto suelto que nadie dibuja
        pero que cualquiera puede leer;
      · en una hoja escaneada y reconocida, el texto reconocido vive también
-       en el modelo que guarda Grapa dentro de la hoja. Se borra de ahí lo
+       en el modelo que guarda Pdflash dentro de la hoja. Se borra de ahí lo
        que cae en la zona, o volvería a salir en la siguiente corrección.
 
    Primero se marcan las zonas —arrastrando sobre la hoja, o todas las
@@ -3731,14 +3731,14 @@ function descargar() {
 }
 
 function devolver(extra) {
-  if (!grapa || grapa.closed) { avisar('La ventana de Grapa ya no está abierta.', 'mal'); return; }
+  if (!grapa || grapa.closed) { avisar('La ventana de Pdflash ya no está abierta.', 'mal'); return; }
   grapa.postMessage(Object.assign({ grapa: 'documento-editado', nombre, bytes: bytesActuales, cambios: cambios.length },
     extra && extra.tarea ? extra : {}), '*');
   descargado = true;
-  avisar('Devuelto a Grapa.', 'bien');
+  avisar('Devuelto a Pdflash.', 'bien');
 }
 
-/* ---------- el puente con Grapa ---------- */
+/* ---------- el puente con Pdflash ---------- */
 window.addEventListener('message', (ev) => {
   const d = ev.data;
   if (!d || d.grapa !== 'documento') return;
@@ -3746,7 +3746,7 @@ window.addEventListener('message', (ev) => {
   $('#btnDevolver').hidden = false;
   estrenarDocumento(new Uint8Array(d.bytes), d.nombre || 'documento.pdf');
   if (d.tarea === 'buscable') { hacerBuscableParaGrapa(); return; }
-  avisar('Documento recibido de Grapa.', 'bien');
+  avisar('Documento recibido de Pdflash.', 'bien');
 });
 
 /* ---------- conexiones de la interfaz ---------- */
@@ -3889,7 +3889,7 @@ const escena = $('#escena');
 }));
 escena.addEventListener('drop', (e) => leerArchivo(e.dataTransfer.files[0]));
 
-/* avisar a Grapa de que ya estamos listos para recibir */
+/* avisar a Pdflash de que ya estamos listos para recibir */
 try {
   if (window.opener) window.opener.postMessage({ grapa: 'editor-listo' }, '*');
 } catch (e) { /* sin ventana madre, se usa suelto */ }

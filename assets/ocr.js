@@ -1,5 +1,5 @@
 /* ===========================================================
-   Grapa · Editor · reconocimiento de texto (OCR)
+   Pdflash · Editor · reconocimiento de texto (OCR)
 
    Lee lo que dice una hoja escaneada y devuelve cada palabra con
    su recuadro. Todo dentro del navegador: la imagen no sale del

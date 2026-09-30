@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Grapa · Editor de texto</title>
+<title>Pdflash · Editor de texto</title>
 <link rel="stylesheet" href="assets/editor.css">
 </head>
 <body>
 
-<!-- Saludo inmediato a quien nos haya abierto (Grapa), antes de cargar el
+<!-- Saludo inmediato a quien nos haya abierto (Pdflash), antes de cargar el
      motor: así sabe que aquí sí hay un editor y que solo está arrancando.
      Va en un script normal porque los módulos esperan a sus importaciones. -->
 <script>
@@ -37,7 +37,7 @@
 <header class="barra">
   <div class="marca">
     <svg class="ico ico-marca" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-texto"/></svg>
-    <span class="marca-txt">Grapa · <b>Editor</b></span>
+    <span class="marca-txt">Pdflash · <b>Editor</b></span>
   </div>
 
   <div class="doc-info">
@@ -56,7 +56,7 @@
     <button class="btn" id="btnInsertar" disabled title="Escribir texto nuevo donde pulses (Ctrl+I)"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-insertar"/></svg> Insertar</button>
     <button class="btn" id="btnTachar" disabled title="Quitar del archivo un DNI, una cuenta o un nombre: arrastra sobre lo que hay que tachar"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-tachar"/></svg> Tachar</button>
     <button class="btn" id="btnDeshacer" disabled><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-deshacer"/></svg> Deshacer</button>
-    <button class="btn btn-primario" id="btnDevolver" hidden><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-volver"/></svg> Devolver a Grapa</button>
+    <button class="btn btn-primario" id="btnDevolver" hidden><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-volver"/></svg> Devolver a Pdflash</button>
     <button class="btn" id="btnDescargar" disabled><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-guardar"/></svg> Descargar</button>
     <button class="btn btn-icono" id="btnTema" title="Cambiar el tema" aria-label="Cambiar el tema"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-tema"/></svg></button>
   </div>
@@ -75,7 +75,7 @@
 </div>
 
 <!-- Se ofrece solo cuando no hay nada abierto: si el documento ya llegó
-     —de Grapa o de un archivo— estorbaría más que ayudar. -->
+     —de Pdflash o de un archivo— estorbaría más que ayudar. -->
 <div class="recuperar" id="recuperar" hidden>
   <div class="recuperar-texto">
     <strong>Tenías trabajo a medias</strong>
@@ -143,7 +143,7 @@
     <div class="vacio" id="vacio">
       <svg class="ico ico-vacio" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-abrir"/></svg>
       <h1>Arrastra un PDF aquí</h1>
-      <p>O pulsa <b>Abrir</b>. También puedes mandarlo desde Grapa y volverá corregido.</p>
+      <p>O pulsa <b>Abrir</b>. También puedes mandarlo desde Pdflash y volverá corregido.</p>
     </div>
     <div class="cartel-escaneo" id="cartelEscaneo" hidden>
       <svg class="ico ico-cartel" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-escaneo"/></svg>
@@ -163,7 +163,7 @@
         <button class="btn btn-suave" id="btnReconocerTodas" hidden>Reconocer todas</button>
         </div>
         <p class="cartel-pista">Para escribir <em>encima</em> de una hoja así —una nota, un
-           «COPIA FIEL», un sello— usa <b>Sello y marcas</b> en Grapa, que añade el texto
+           «COPIA FIEL», un sello— usa <b>Sello y marcas</b> en Pdflash, que añade el texto
            sin tocar el escaneo.</p>
       </div>
     </div>
@@ -181,7 +181,7 @@
 <input type="file" id="archivo" accept="application/pdf,.pdf" hidden>
 
 <footer class="pie">
-  Grapa Editor usa <a href="https://mupdf.com" target="_blank" rel="noopener">MuPDF</a> de Artifex Software · programa libre bajo <a href="LICENSE" target="_blank" rel="noopener">AGPL-3.0-or-later</a> ·
+  Pdflash Editor usa <a href="https://mupdf.com" target="_blank" rel="noopener">MuPDF</a> de Artifex Software · programa libre bajo <a href="LICENSE" target="_blank" rel="noopener">AGPL-3.0-or-later</a> ·
   <a href="https://github.com/RenzoMoran9/HERRAMIENTA-PDF" target="_blank" rel="noopener">código fuente</a>
 </footer>
 
