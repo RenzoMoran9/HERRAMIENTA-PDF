@@ -847,6 +847,13 @@ const LETRAS_ESCANEO = {
 const ORDEN_LETRAS = ['arial', 'tahoma', 'verdana', 'times', 'courier'];
 const cssLetra = (k) => (LETRAS_ESCANEO[k] || LETRAS_ESCANEO.arial).css;
 let lienzoLetras = null;
+/** Cuánto sube y cuánto baja un texto de su línea, en puntos, con una de esas letras. */
+function alturasConLetra(texto, clave, tam, negrita) {
+  if (!lienzoLetras) lienzoLetras = document.createElement('canvas').getContext('2d');
+  lienzoLetras.font = (negrita ? 'bold ' : '') + '100px ' + cssLetra(clave);
+  const m = lienzoLetras.measureText(String(texto || ''));
+  return { sube: (m.actualBoundingBoxAscent || 72) / 100 * tam, baja: (m.actualBoundingBoxDescent || 0) / 100 * tam };
+}
 /** Lo que mide un texto, en puntos, con una de esas letras. */
 function anchoConLetra(texto, clave, tam, negrita) {
   if (!lienzoLetras) lienzoLetras = document.createElement('canvas').getContext('2d');
@@ -1157,7 +1164,7 @@ function editar(indice, valorInicial) {
    no se puede medir nada. */
 const AUMENTO_MEDIDA = 3;
 
-function medirRenglon(pagina, caja) {
+function medirRenglon(pagina, caja, cubrir) {
   const A = AUMENTO_MEDIDA;
   const pix = pagina.toPixmap(Matrix.scale(A, A), ColorSpace.DeviceRGB, false, true);
   const anP = pix.getWidth(), alP = pix.getHeight();
@@ -1398,6 +1405,16 @@ function medirRenglon(pagina, caja) {
   while (pArriba > 0 && hayTinta(pArriba - 1)) pArriba--;
   let pAbajo = abajo;
   while (pAbajo < al - 1 && hayTinta(pAbajo + 1)) pAbajo++;
+  // `cubrir` [arriba, abajo] en puntos: lo que ocupará el texto NUEVO. Si
+  // lleva letras que bajan de la línea (p, g, y) y el viejo no, el parche se
+  // alarga por papel limpio hasta taparlas; lo que quede fuera del parche no
+  // se ve. Nunca por encima de una raya ni de otro renglón.
+  if (cubrir) {
+    const libreFila = (y) => !esRaya(y) && oscuraEnFila[y] <= Math.max(1, an * 0.005);
+    const ya = Math.max(0, Math.floor(cubrir[0] * A) - y0), yb = Math.min(al - 1, Math.ceil(cubrir[1] * A) - y0);
+    while (pArriba > ya && libreFila(pArriba - 1)) pArriba--;
+    while (pAbajo < yb && libreFila(pAbajo + 1)) pAbajo++;
+  }
 
   let parche = null;
   if (limpias.length >= 2) {
@@ -2633,7 +2650,21 @@ function reescribirEnEscaneo(indice, textoNuevo, desp, aj) {
     fila.base = (fila.base != null ? fila.base : fila.y1 - met.abajo * tam) + desp.dy;
     if (fila.tam == null) fila.tam = tam;
   }
-  const guardado = parchesPapel.get(paginaActual + ':' + r.enModelo);
+  let guardado = parchesPapel.get(paginaActual + ':' + r.enModelo);
+  // el parche tiene que tapar lo que ocupará el texto nuevo, también lo que
+  // baja de la línea: si no llega, se vuelve a medir más alto
+  if (guardado && textoNuevo && fila.base != null && fila.tam) {
+    const alt = alturasConLetra(comoQuedara(textoNuevo).texto, fila.familia, fila.tam, fila.negrita);
+    const quiere = [fila.base - alt.sube - 0.4, fila.base + alt.baja + 0.4];
+    const p = guardado.p;
+    if (quiere[0] < p.y || quiere[1] > p.y + p.alto) {
+      const alto = medirRenglon(pagina, [p.x + 2 / AUMENTO_MEDIDA, fila.y0, p.x + p.ancho - 2 / AUMENTO_MEDIDA, fila.y1], quiere);
+      if (alto && alto.parche && alto.parche.alto > p.alto) {
+        guardado = { p: alto.parche, s: guardado.s };
+        parchesPapel.set(paginaActual + ':' + r.enModelo, guardado);
+      }
+    }
+  }
   const eraBorrado = !!fila.borrado;
   fila.t = textoNuevo;
   fila.editado = !!textoNuevo;

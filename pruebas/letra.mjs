@@ -130,6 +130,17 @@ d = await bajar('nuevo.pdf');
 const nuevo = modelo(d).renglones.find((x) => x.insertado);
 ok('y el renglón nuevo se guarda con esa letra', nuevo && /tahoma|verdana/.test(nuevo.familia), nuevo && nuevo.familia);
 
+console.log('\n--- letras que bajan de la línea (p, g, y) ---');
+// «La entidad se reserva…» no tiene ninguna letra que baje de la línea; el
+// texto nuevo sí. El recuadro que tapa lo viejo se medía con el texto viejo
+// y acababa en la línea: la «p» y la «g» nuevas salían cortadas por abajo.
+const e0 = modelo(d).renglones.find((x) => /entidad/.test(x.t));
+await corregir('entidad', 'Plazo y pago: 15 dias, garantia y equipo.');
+d = await bajar('bajan.pdf');
+const e1 = modelo(d).renglones.find((x) => /Plazo y pago/.test(x.t));
+const rabos = e1 ? tinta(d, [e1.x, e1.base + 0.6, e1.x + 200, e1.base + e1.tam * 0.22]) : -1;
+ok('las p, g, y nuevas se ven enteras (tinta por debajo de la línea)', rabos > 60, { puntosBajoLaLinea: rabos, renglonViejo: e0 && e0.t });
+
 console.log('\n--- en una hoja con texto de verdad ---');
 await pag.setInputFiles('#archivo', path.join(RAIZ, 'pruebas', 'tachar.pdf'));
 await pag.waitForSelector('.renglon', { timeout: 20000 });
