@@ -94,7 +94,7 @@ for (const [pre, nuevo] of MISMAS) {
 /* ---------- 2. una letra que el documento no incrusta ---------- */
 const avisoFalta = await corregir('1.6.', '1.6. Adjuntar BPA, BPM, REGISTRO SANITARIO, FICHA (DE CORRESPONDER)');
 ok('cuando la letra no está incrustada, se dice cuál y con qué se escribió',
-   avisoFalta && /Escrito en .+: la del documento no trae/.test(avisoFalta), avisoFalta);
+   avisoFalta && /El renglón va en .+: la letra del documento no trae/.test(avisoFalta), avisoFalta);
 
 /* ---------- 3. lo que dice el archivo que sale ---------- */
 const bajada = pag.waitForEvent('download');
@@ -114,8 +114,11 @@ for (const [pre, nuevo] of MISMAS) {
 }
 
 const nB = fuentesPorRenglon(salida).find((l) => l.t.includes('FICHA'));
-ok('lo que no cambió sigue con la letra del documento; solo el trozo nuevo va con la de serie',
-   !!(nB && nB.f.some((n) => /LiberationSans-Bold/.test(n)) && nB.f.some((n) => /^Helvetica-Bold$/.test(n))),
+// Si falta una letra, el renglón ENTERO va con la de serie: mezclar la incrustada con
+// la de serie en un renglón hacía que otros lectores (pdf.js en Windows) lo pintaran
+// como basura.
+ok('si falta una letra, el renglón entero va con una sola tipografía de serie, sin mezclar',
+   !!(nB && nB.f.length && nB.f.every((n) => /^Helvetica-Bold$/.test(n))),
    nB && nB.f);
 
 /* ---------- 4. y lo insertado también ---------- */
