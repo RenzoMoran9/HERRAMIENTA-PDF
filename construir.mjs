@@ -4,6 +4,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import zlib from 'node:zlib';
 
 const aqui = path.dirname(new URL(import.meta.url).pathname);
 const leer = (...p) => fs.readFileSync(path.join(aqui, ...p), 'utf8');
@@ -53,6 +54,20 @@ ocr = ocr.slice(0, i0) + 'async function piezas() {\n  return {\n'
   + '    trabajador: ' + desde(enB64('lib', 'ocr', 'worker.min.js')) + ',\n'
   + '    idioma: ' + desde(enB64('lib', 'ocr', 'spa.traineddata.gz')) + ',\n'
   + '  };\n}\n\n' + ocr.slice(i1);
+
+/* --- PaddleOCR, el lector principal: sus piezas viajan comprimidas (gzip) y
+       en base64, y se descomprimen en el navegador la primera vez que hacen falta --- */
+const p0 = ocr.indexOf('/*PIEZAS-PADDLE*/');
+const p1 = ocr.indexOf('/*FIN-PIEZAS-PADDLE*/');
+if (p0 < 0 || p1 < 0) throw new Error('no encuentro el hueco de las piezas de PaddleOCR en ocr.js');
+const gz = (...r) => '"' + zlib.gzipSync(fs.readFileSync(path.join(aqui, ...r)), { level: 9 }).toString('base64') + '"';
+const PADDLE = ['paddle-worker.js', 'ort.wasm.bundle.min.mjs', 'ort-wasm-simd-threaded.wasm', 'paddle-det.onnx', 'paddle-rec.onnx', 'paddle-dic.txt'];
+ocr = ocr.slice(0, p0) + 'async function piezasPaddle() {\n'
+  + '  const abrir = async (b) => new Uint8Array(await new Response(new Blob([Uint8Array.from(atob(b), (c) => c.charCodeAt(0))])\n'
+  + '    .stream().pipeThrough(new DecompressionStream(\'gzip\'))).arrayBuffer());\n'
+  + '  const [worker, ort, wasm, det, rec, dic] = await Promise.all([\n'
+  + PADDLE.map((f) => '    ' + gz('lib', 'ocr', f)).join(',\n') + '].map(abrir));\n'
+  + '  return { worker, ort, wasm, det, rec, dic };\n}\n' + ocr.slice(p1);
 
 const marcaRec = motor.split('\n').find((l) => l.startsWith('/*IMPORTA-RECONOCER*/'));
 if (!marcaRec) throw new Error('falta la línea marcada /*IMPORTA-RECONOCER*/ en editor.js');

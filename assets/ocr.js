@@ -321,9 +321,22 @@ function juntarPorHueco(lista) {
 export async function reconocer(imagen, cuadricula, alProgresar) {
   const columnas = (cuadricula && cuadricula.columnas) || [];
   const filas = (cuadricula && cuadricula.filas) || [];
+  // PaddleOCR primero; Tesseract solo si aquel no arranca en este navegador
+  let data = null;
+  try {
+    if (alProgresar) alProgresar('recognizing text', 0.1);
+    data = await leerConPaddle(imagen);
+  } catch (e) {
+    console.warn('PaddleOCR no pudo leer; se lee con Tesseract.', e);
+  }
+  if (data) {
+    // PaddleOCR ve cada celda como su propio bloque: la segunda pasada de
+    // Tesseract (para el texto suelto de los cuadros) no hace falta
+    return terminar(renglonesDe(data, columnas, filas), { renglones: [], palabras: 0 }, columnas, filas, data);
+  }
   const t = await arrancar(alProgresar);
-  const { data } = await t.recognize(imagen, {}, { text: true, blocks: true });
-  const uno = renglonesDe(data, columnas, filas);
+  const { data: dataT } = await t.recognize(imagen, {}, { text: true, blocks: true });
+  const uno = renglonesDe(dataT, columnas, filas);
 
   let dos = { renglones: [], palabras: 0 };
   try {
@@ -335,6 +348,11 @@ export async function reconocer(imagen, cuadricula, alProgresar) {
   finally {
     try { await t.setParameters({ tessedit_pageseg_mode: '3' }); } catch (e) {}
   }
+  return terminar(uno, dos, columnas, filas, dataT);
+}
+
+/** Funde las dos lecturas, junta las celdas y corrige lo habitual. */
+function terminar(uno, dos, columnas, filas, data) {
 
   // Fundir las dos lecturas. La regla: cuando la segunda pasada encuentra
   // VARIAS piezas donde la primera vio una sola línea, mandan las piezas.
@@ -430,6 +448,10 @@ const REGLAS = [
   // (las hechas de cifras piden un espacio antes del monto: «51,250.00» es un
   // monto de cincuenta y un mil y no se toca; nunca se come una cifra)
   { que: 'S/', re: new RegExp('(' + DINERO + String.raw`)(?:(?:51|57|5)\s|5:\s?|(?:si|sl)\.?\s?)(?=` + MONTO + ')', 'giu'), por: '$1S/ ' },
+  // N° y S/ pegados al número («N°10488», «S/18.90»): PaddleOCR se come a veces ese espacio
+  { que: 'N°', re: /\bN[°º](?=\d)/g, por: 'N° ' },
+  { que: 'RUC', re: /\bRUC(?=\d{11}\b)/g, por: 'RUC ' },
+  { que: 'S/', re: new RegExp(String.raw`(^|[^\p{L}\p{N}])S\/(?=` + MONTO + ')', 'gu'), por: '$1S/ ' },
   // DE entre dos palabras en mayúsculas
   { que: 'DE', re: /(\b[A-ZÁÉÍÓÚÑ]{2,}\s)(?:na|ne|oe|pe|0E|OE|DF)(?=\s[A-ZÁÉÍÓÚÑ]{2,}\b)/g, por: '$1DE' },
 ];
@@ -457,4 +479,83 @@ export async function soltar() {
   if (!trabajador) return;
   try { await trabajador.terminate(); } catch (e) {}
   trabajador = null;
+}
+
+/* ---------- PaddleOCR: el lector principal ----------
+   Lee mucho mejor que Tesseract la letra chica, los números, los correos y
+   las tablas de un escaneo. Corre en su propio Worker con ONNX Runtime; si
+   el navegador no puede con él, se lee con Tesseract como antes.
+   Servido, las piezas se traen de lib/ocr; en el archivo suelto, el
+   constructor las mete dentro, comprimidas. */
+/*PIEZAS-PADDLE*/
+async function piezasPaddle() {
+  const traer = async (rel) =>
+    new Uint8Array(await (await fetch(new URL(rel, import.meta.url))).arrayBuffer());
+  const [worker, ort, wasm, det, rec, dic] = await Promise.all([
+    '../lib/ocr/paddle-worker.js', '../lib/ocr/ort.wasm.bundle.min.mjs', '../lib/ocr/ort-wasm-simd-threaded.wasm',
+    '../lib/ocr/paddle-det.onnx', '../lib/ocr/paddle-rec.onnx', '../lib/ocr/paddle-dic.txt'].map(traer));
+  return { worker, ort, wasm, det, rec, dic };
+}
+/*FIN-PIEZAS-PADDLE*/
+
+let paddle = null;
+function arrancarPaddle() {
+  if (paddle) return paddle;
+  paddle = (async () => {
+    if (typeof OffscreenCanvas === 'undefined' || typeof createImageBitmap === 'undefined') {
+      throw new Error('navegador sin OffscreenCanvas');
+    }
+    const p = await piezasPaddle();
+    const dec = new TextDecoder();
+    // ONNX Runtime y el lector van juntos en UN Worker: abierto desde el disco, un
+    // Worker no puede cargar otras piezas. Su «export» se vuelve la constante `ort`,
+    // y la dirección del .wasm (que viaja en bytes) no se calcula.
+    let motor = dec.decode(p.ort).replace(/export\s*\{([^}]*)\}\s*;?\s*$/, (m, lista) =>
+      'const ort = {' + lista.split(',').map((par) => {
+        const [interno, , publico] = par.trim().split(/\s+/);
+        return (publico || interno) + ': ' + interno;
+      }).join(', ') + '};');
+    if (!/const ort = \{/.test(motor)) throw new Error('no se reconoció el motor ONNX');
+    motor = motor.split('new URL("ort-wasm-simd-threaded.wasm",import.meta.url).href').join('"ort-wasm-simd-threaded.wasm"');
+    motor = 'var urlOrt = self.location.href;\n' + motor.split('import.meta.url').join('urlOrt');
+    const url = URL.createObjectURL(new Blob([motor, '\n', dec.decode(p.worker)], { type: 'text/javascript' }));
+    const w = new Worker(url);
+    await new Promise((ok, mal) => {
+      w.onmessage = (e) => (e.data.tipo === 'listo' ? ok() : mal(new Error(e.data.mensaje || 'el lector no arrancó')));
+      w.onerror = (e) => mal(new Error(e.message || 'el lector no arrancó'));
+      w.postMessage({ tipo: 'iniciar', wasm: p.wasm.buffer, det: p.det.buffer, rec: p.rec.buffer, dic: dec.decode(p.dic) });
+    });
+    return w;
+  })().catch((e) => { paddle = null; throw e; });
+  return paddle;
+}
+
+let turnoPaddle = 0;
+/**
+ * Lee con PaddleOCR y lo devuelve con la forma de Tesseract —líneas con sus
+ * palabras, la confianza de 0 a 100 y las cajas en píxeles—, para que todo lo
+ * que viene después (celdas, huecos, correcciones) sirva igual. Cada bloque
+ * de texto que encuentra PaddleOCR es una línea: en un cuadro, una celda.
+ */
+async function leerConPaddle(imagen) {
+  const w = await arrancarPaddle();
+  const bmp = await createImageBitmap(imagen);
+  const W = bmp.width, H = bmp.height;
+  const id = ++turnoPaddle;
+  const r = await new Promise((ok, mal) => {
+    w.onmessage = (e) => {
+      if (e.data.id !== id) return;
+      if (e.data.tipo === 'leida') ok(e.data); else mal(new Error(e.data.mensaje || 'falló la lectura'));
+    };
+    w.postMessage({ tipo: 'leer', id, imagen: bmp }, [bmp]);
+  });
+  const porBloque = new Map();
+  for (const p of r.palabras) {
+    if (!porBloque.has(p.b)) porBloque.set(p.b, []);
+    porBloque.get(p.b).push({ text: p.t, confidence: p.c * 100,
+      bbox: { x0: p.x0 * W, y0: p.y0 * H, x1: p.x1 * W, y1: p.y1 * H } });
+  }
+  const lines = [...porBloque.values()].map((words) => ({ words: words.sort((a, b) => a.bbox.x0 - b.bbox.x0) }));
+  const todas = r.palabras.length ? r.palabras.reduce((a, p) => a + p.c, 0) / r.palabras.length : 0;
+  return { blocks: [{ paragraphs: [{ lines }] }], confidence: todas * 100 };
 }

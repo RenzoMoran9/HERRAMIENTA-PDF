@@ -11,3 +11,17 @@ Las tres son libres y compatibles con la AGPL-3.0 de Grapa Editor.
 Se incluye la variante «simd-lstm» del núcleo, con el WebAssembly dentro del
 propio JavaScript: así el trabajador no tiene que descargar nada y el editor
 funciona abierto desde el disco, sin internet.
+
+Lector principal (desde octubre de 2026): PaddleOCR
+---------------------------------------------------
+
+  paddle-det.onnx, paddle-rec.onnx, paddle-dic.txt
+      modelos PP-OCRv6 tiny de PaddleOCR (detección y reconocimiento)
+      Apache-2.0   https://github.com/PaddlePaddle/PaddleOCR
+      en ONNX, de https://github.com/PT-Perkasa-Pilar-Utama/ppu-paddle-ocr-models
+  ort.wasm.bundle.min.mjs, ort-wasm-simd-threaded.wasm
+      ONNX Runtime Web 1.23.0   MIT   https://github.com/microsoft/onnxruntime
+  paddle-worker.js
+      propio (el mismo de Pdflash): el lector que corre en un Worker
+
+Tesseract queda de respaldo, para los navegadores donde PaddleOCR no arranca.

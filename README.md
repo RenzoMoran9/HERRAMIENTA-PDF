@@ -470,8 +470,10 @@ node pruebas/hacer-correo.mjs pruebas/correo.pdf   # rehace ese PDF de prueba
 Este programa es **software libre bajo la [AGPL-3.0-or-later](LICENSE)**, porque
 usa [MuPDF](https://mupdf.com) de Artifex Software, que se distribuye con esa
 licencia. El reconocimiento de texto usa
-[Tesseract](https://github.com/naptha/tesseract.js), que es Apache-2.0 y por
-tanto compatible; sus avisos están en [`lib/ocr/AVISOS.txt`](lib/ocr/AVISOS.txt).
+[PaddleOCR](https://github.com/PaddlePaddle/PaddleOCR) (Apache-2.0) con
+[ONNX Runtime Web](https://github.com/microsoft/onnxruntime) (MIT), y de
+respaldo [Tesseract](https://github.com/naptha/tesseract.js) (Apache-2.0); todas
+compatibles, y sus avisos están en [`lib/ocr/AVISOS.txt`](lib/ocr/AVISOS.txt).
 
 En corto: puedes usarlo, copiarlo y modificarlo libremente. Si repartes una
 versión modificada —o la pones en una web para que otros la usen— tienes que
