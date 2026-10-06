@@ -420,8 +420,19 @@ function plantarFuente(objPag, f) {
   if (!f || !f.ref || !f.clave) return;
   const fuentes = fuentesDe(objPag);
   const hay = fuentes.get(f.clave);
-  if (hay && hay.isDictionary && hay.isDictionary()) return;
+  // el nombre sigue ahí, pero ¿es de ESA tipografía? Si al redactar quedó
+  // apuntando a otra, el texto nuevo se pintaría con la que no es
+  if (hay && hay.isDictionary && hay.isDictionary() && mismaFuente(hay, f.ref)) return;
   fuentes.put(f.clave, f.ref);
+}
+
+/** ¿Son la misma tipografía? (el mismo objeto, o una que se llama igual y trae la misma /ToUnicode) */
+function mismaFuente(a, b) {
+  try {
+    if (a.isIndirect && b.isIndirect && a.isIndirect() && b.isIndirect()) return a.asIndirect() === b.asIndirect();
+    const nom = (x) => { const bf = x.get('BaseFont'); return bf && bf.isName() ? bf.asName() : ''; };
+    return nom(a) === nom(b);
+  } catch (e) { return true; }
 }
 
 /** La cadena tal como se pide en el flujo, o null si falta alguna letra. */
@@ -450,7 +461,7 @@ function medirIncrustada(f, texto, tam) {
  * Devuelve ya todo resuelto —el nombre del recurso, la cadena y el ancho—
  * para que quien escribe no tenga que saber de cuál se trata.
  */
-function conQueEscribir(pagina, objPag, nombreFuente, rasgos, texto, tam, cache) {
+function conQueEscribir(pagina, objPag, nombreFuente, rasgos, texto, tam, cache, soloDeSerie) {
   // Un renglón se reescribe trozo a trozo y cada trozo pregunta por su
   // tipografía. Sin recordar la respuesta se leería el mismo /ToUnicode cien
   // veces y se meterían cien tipografías de serie iguales en la hoja.
@@ -468,7 +479,7 @@ function conQueEscribir(pagina, objPag, nombreFuente, rasgos, texto, tam, cache)
      que no esté en ninguno va con la equivalente de serie. */
   const tramos = [];
   for (const c of texto) {
-    const donde = base.propias.find((p) => p.codigos.has(c)) || null;
+    const donde = soloDeSerie ? null : base.propias.find((p) => p.codigos.has(c)) || null;
     const id = donde ? donde.clave : '';
     const ultimo = tramos[tramos.length - 1];
     if (ultimo && ultimo.id === id) ultimo.texto += c;
@@ -478,9 +489,13 @@ function conQueEscribir(pagina, objPag, nombreFuente, rasgos, texto, tam, cache)
   const deSerie = () => {
     if (!base.serie) {
       const elegida = resolverFuente(nombreFuente, rasgos);
-      const clave = 'GrapaEd' + (contadorFuente++);
+      const fuentes = fuentesDe(objPag);
+      // un nombre que la hoja no use ya: un PDF que pasó antes por el editor
+      // trae sus «GrapaEd0», y pisarlo cambiaría la letra de lo corregido antes
+      let clave;
+      do { clave = 'GrapaEd' + (contadorFuente++); } while (fuentes.get(clave) && !fuentes.get(clave).isNull());
       const ref = doc.addSimpleFont(elegida.fuente, 'Latin');
-      fuentesDe(objPag).put(clave, ref);
+      fuentes.put(clave, ref);
       base.serie = { elegida, clave, ref };
     }
     return base.serie;
@@ -2555,7 +2570,7 @@ function hacerCambio(accion, antes, despues) {
           + '; quedó como «?».'
         : '')
         + (resultado.faltan && resultado.faltan.length
-          ? ' Escrito en ' + resultado.tipografia + ': la del documento no trae '
+          ? ' El renglón va en ' + resultado.tipografia + ': la letra del documento no trae '
             + resultado.faltan.slice(0, 4).map((c) => '«' + c + '»').join(', ') + '.'
           : '');
       avisar((resultado.borrado ? 'Renglón borrado.'
@@ -2801,6 +2816,21 @@ function reescribir(indice, textoNuevo, desp, aj) {
   }
   for (const t of piezas) {
     t.f = conQueEscribir(pagina, objPag, t.fuente, t.rasgos, t.texto, t.size, cacheFuentes);
+  }
+  // Si a la tipografía del documento le falta alguna letra, el renglón ENTERO
+  // va con la de serie. Mezclar en un renglón la incrustada (códigos de dos
+  // bytes sacados de su /ToUnicode) con la de serie dejaba lectores —el de
+  // Pdflash, en Windows— que pintaban el renglón como basura («ì0 ½-½²…»),
+  // aunque aquí se viera bien. Una sola tipografía de serie se ve igual en
+  // todos lados.
+  if (piezas.some((t) => t.f.sustituida) && piezas.some((t) => !t.f.sustituida && t.f.trozos.length)) {
+    const cacheSerie = new Map();
+    for (const t of piezas) {
+      // el aviso dice lo que de verdad faltaba, no todas las letras del renglón
+      const faltaban = t.f.faltan;
+      t.f = conQueEscribir(pagina, objPag, t.fuente, t.rasgos, t.texto, t.size, cacheSerie, true);
+      t.f.faltan = faltaban;
+    }
   }
 
   // 1. quitar el texto viejo de dentro del archivo, no taparlo
