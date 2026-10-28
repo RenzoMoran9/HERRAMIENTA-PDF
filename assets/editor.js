@@ -690,6 +690,7 @@ let firmasPuestas = 0;
 function estrenarDocumento(bytes, comoSeLlama) {
   paginaActual = 0;
   pila = []; cambios = []; contadorFuente = 0; reconocidos.clear();
+  yaDevueltos = 0;
   hallazgos = []; hallazgoActual = -1; ultimaAguja = null; motivosFallo.clear();
   if (!abrirBytes(bytes, comoSeLlama)) return;
   firmasPuestas = firmasDe(doc);
@@ -3793,17 +3794,48 @@ function descargar() {
 
 function devolver(extra) {
   if (!grapa || grapa.closed) { avisar('La ventana de Pdflash ya no está abierta.', 'mal'); return; }
-  grapa.postMessage(Object.assign({ grapa: 'documento-editado', nombre, bytes: bytesActuales, cambios: cambios.length },
-    extra && extra.tarea ? extra : {}), '*');
+  grapa.postMessage(Object.assign({ grapa: 'documento-editado', envio: envioActual, nombre, bytes: bytesActuales,
+    cambios: cambios.length }, extra && extra.tarea ? extra : {}), '*');
   descargado = true;
+  yaDevueltos = cambios.length;
   avisar('Devuelto a Pdflash.', 'bien');
 }
 
-/* ---------- el puente con Pdflash ---------- */
+/* ---------- el puente con Pdflash ----------
+   Si el editor ya está abierto, Pdflash no lo recarga: pregunta «hola» y le
+   manda la hoja nueva aquí mismo. Cada envío trae su número, que vuelve con
+   lo corregido para que Pdflash lo ponga en SUS hojas. */
+let envioActual = null;
+let yaDevueltos = 0;            // de la lista de cambios, cuántos llegaron ya a Pdflash
 window.addEventListener('message', (ev) => {
   const d = ev.data;
-  if (!d || d.grapa !== 'documento') return;
-  grapa = ev.source || window.opener;
+  if (!d || typeof d !== 'object') return;
+  const quien = ev.source || window.opener;
+  if (d.grapa === 'hola') {
+    try { quien.postMessage({ grapa: 'editor-listo' }, '*'); } catch (e) {}
+    return;
+  }
+  if (d.grapa !== 'documento') return;
+  const acuse = (que) => { try { quien.postMessage({ grapa: que, envio: d.envio }, '*'); } catch (e) {} };
+  // el mismo envío repetido (Pdflash lo reenvía si no le llegó el acuse)
+  if (doc && d.envio != null && d.envio === envioActual) { acuse('documento-recibido'); return; }
+  // lo que hay aquí sin devolver ni bajar no se tira sin preguntar
+  if (doc && !descargado) {
+    const n = Math.max(0, cambios.length - yaDevueltos);
+    const seguir = window.confirm('Pdflash te manda otra hoja, pero «' + nombre + '» tiene '
+      + (n === 1 ? '1 cambio' : n ? n + ' cambios' : 'cambios') + ' que aún no devolviste.\n\n'
+      + 'Aceptar: descartarlos y abrir lo que manda Pdflash.\n'
+      + 'Cancelar: quedarte con lo de aquí (después lo devuelves y vuelves a mandar la hoja).');
+    if (!seguir) {
+      acuse('documento-rechazado');
+      avisar('Sigues con «' + nombre + '». Devuélvelo a Pdflash cuando acabes.', 'mal');
+      return;
+    }
+  }
+  acuse('documento-recibido');
+  grapa = quien;
+  envioActual = d.envio != null ? d.envio : null;
+  cerrarCampo();
   $('#btnDevolver').hidden = false;
   estrenarDocumento(new Uint8Array(d.bytes), d.nombre || 'documento.pdf');
   if (d.tarea === 'buscable') { hacerBuscableParaGrapa(); return; }
@@ -4052,6 +4084,9 @@ async function mirarSiHayTrabajo() {
   try { g = await enBD('readonly', (a) => a.get(BD_CLAVE)); } catch (e) { guardarFalla = e && e.name; }
   pintarEstadoGuardado();
   if (!g || !g.bytes || !g.bytes.length) return;
+  // abierto desde Pdflash, la hoja viene en camino: no se ofrece lo de antes
+  // mientras llega, que parecía que había vuelto la corrección vieja
+  if (window.opener && !doc) await new Promise((r) => setTimeout(r, 5000));
   if (doc) return;                       // ya llegó algo: no estorbar
   guardadoEnEspera = g;
   const n = (g.cambios || []).length;
